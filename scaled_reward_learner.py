@@ -109,6 +109,7 @@ class ScaledRewardLearner(nn.Module):
 
     def set_device(self, device: Device):
         self.to(device)
+        self.actions_onehot = self.actions_onehot.to(device)
         self.device = device
 
 
@@ -204,7 +205,7 @@ class ScaledRewardLearner(nn.Module):
         q2 = self.q2.get_q(state, self.actions_onehot)
 
         q = tc.min(q1, q2)
-        action = q.argmax(-1).numpy()
+        action = q.argmax(-1).cpu().numpy()
 
         return action
 
@@ -310,15 +311,19 @@ def train_agent(
     n_warmup_episodes: int,
     batch_size: int,
     replay_buffer: ReplayBuffer | int,
+    custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None = None,
     start_episode: int = 0,
     save_interval: int | None = None,
     save_path: str | Path | None = None,
     show_tqdm: bool = True,
     use_mlflow: bool = True,
 ):
-    '''Training algorithm for a Q-learning agent with modified Bellman function in a gym environment with a discrete action space'''
+    '''
+    Training algorithm for a Q-learning agent with modified Bellman function in a gym environment with a discrete action space
+
+    * custom_reward: Maps `(observation, action, game_reward)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
+    '''
     # make sure that the action space has the right properties
-    # these are limitations of my implementation, not of the general algorithm
     assert isinstance(env.action_space, gym.spaces.Discrete) or isinstance(env.action_space, gym.spaces.MultiDiscrete), "Action space must be discrete!"
 
     # determine if environment runs in parallel
@@ -326,6 +331,13 @@ def train_agent(
 
     # make sure the save params makes sense
     assert (save_interval is None) == (save_path is None), "Parameters 'save_interval' and 'save_path' must either both be given or both be None!"
+
+    # define reward function
+    reward_fn = (
+            (lambda o, a, r: r) # only use game reward
+        if custom_reward is None else
+            (lambda o, a, r: custom_reward(o, a, r)) # use custom reward
+    )
 
     # save untrained model
     if start_episode == 0 and save_path is not None:
@@ -370,7 +382,7 @@ def train_agent(
             state = state.detach()
             action = agent.actions_onehot[action].detach()
             next_state = _obs_to_state(observation, agent.device).detach()
-            reward = tc.tensor(_reward, dtype=tc.float, device=agent.device).detach()
+            reward = tc.tensor(reward_fn(observation, action, _reward), dtype=tc.float, device=agent.device).detach()
             terminated = tc.tensor(_terminated, dtype=tc.bool, device=agent.device).detach()
             truncated = tc.tensor(_truncated, dtype=tc.bool, device=agent.device).detach()
 

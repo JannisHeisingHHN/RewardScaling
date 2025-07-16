@@ -7,15 +7,28 @@ import gymnasium as gym
 from scaled_reward_learner import ScaledRewardLearner, train_agent, _obs_to_state
 from replay_buffer import ReplayBuffer
 
+from torch.types import Tensor
+from numpy.typing import NDArray
 
-# DEVICE = "cuda" if tc.cuda.is_available() else "cpu"
-DEVICE = "cpu"
+
+DEVICE = "cuda" if tc.cuda.is_available() else "cpu"
 print(f"Device: {DEVICE}")
 
 
 # decide whether to use mlflow
 use_mlflow = True
 mlflow_info_tag = "Initial test"
+
+mlflow_uri = "http://127.0.0.1:8080"
+mlflow_experiment = "SRL_MountainCar-v0"
+
+# mlflow_uri = "http://10.30.20.11:5000"
+# mlflow_experiment = "jheis_SRL_MountainCar-v0"
+
+if use_mlflow:
+    print(f"MLFlow: {mlflow_uri} | {mlflow_experiment} | {mlflow_info_tag}")
+else:
+    print("MLFlow: False")
 
 
 # set hyperparameters
@@ -57,9 +70,6 @@ env: gym.vector.SyncVectorEnv = gym.make_vec(**params['env'], vectorization_mode
 state_size = env.observation_space.shape[-1] # type: ignore
 action_size = int(env.action_space.nvec[0]) # type: ignore
 
-# policy = ConstantPolicy(tc.tensor([0], device=DEVICE))
-
-
 agent = ScaledRewardLearner(
     architecture = [state_size + action_size] + params['architecture_hidden'] + [1],
     n_actions = int(env.action_space.nvec[0]), # type: ignore
@@ -71,28 +81,39 @@ agent = ScaledRewardLearner(
 
 replay_buffer = ReplayBuffer(6, params['replay_buffer_size'])
 
+# the docstring is used as the parameter value for mlflow
+def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray):
+    '''x_pos + flag_bonus'''
+    x_pos = state[:, 0] # x-position of cart
+    flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the x-position
+    reward = x_pos + flag_bonus
+
+    return reward
+
+
 if use_mlflow:
     import mlflow
 
     # make sure to have an mlflow server running with "mlflow server --host 127.0.0.1 --port 8080"
-    mlflow.set_tracking_uri("http://127.0.0.1:8080")
-    mlflow.set_experiment("SRL_MountainCar-v0")
+    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_experiment(mlflow_experiment)
 
     with mlflow.start_run():
         mlflow.log_params(params)
-        mlflow.set_tag("Info", mlflow_info_tag) # !!! UPDATE !!!
+        mlflow.log_param("custom_reward", custom_reward.__doc__)
+        mlflow.set_tag("Info", mlflow_info_tag)
 
         try:
             train_agent(
-                env,
-                agent,
+                env = env,
+                agent = agent,
                 n_episodes = params['n_episodes'],
                 n_steps_per_episode = params['n_steps_per_episode'],
                 n_train_epochs = params['n_train_epochs'],
                 n_warmup_episodes = params['n_warmup_episodes'],
                 batch_size = params['batch_size'],
-                # replay_buffer = params['replay_buffer_size'],
                 replay_buffer = replay_buffer,
+                custom_reward = custom_reward,
                 start_episode = params['start_episode'],
                 save_interval = params['save_interval'],
                 save_path = params['save_path'],
@@ -104,15 +125,15 @@ if use_mlflow:
             mlflow.set_tag("Note", "Interruption by assertion error")
 else:
     train_agent(
-        env,
-        agent,
+        env = env,
+        agent = agent,
         n_episodes = params['n_episodes'],
         n_steps_per_episode = params['n_steps_per_episode'],
         n_train_epochs = params['n_train_epochs'],
         n_warmup_episodes = params['n_warmup_episodes'],
         batch_size = params['batch_size'],
-        # replay_buffer = params['replay_buffer_size'],
         replay_buffer = replay_buffer,
+        custom_reward = custom_reward,
         start_episode = params['start_episode'],
         save_interval = params['save_interval'],
         save_path = params['save_path'],
