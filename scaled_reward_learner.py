@@ -1,3 +1,4 @@
+import numpy as np
 import torch as tc
 from torch import nn
 from torch.nn.functional import one_hot
@@ -77,9 +78,7 @@ class ScaledRewardLearner(nn.Module):
         self,
         architecture: list[int | nn.Module],
         n_actions: int,
-        discount_factor: float,
         polyak: float,
-        lr: float | Tensor,
         device: Device,
         *args,
         **kwargs
@@ -89,8 +88,8 @@ class ScaledRewardLearner(nn.Module):
         self.q1 = QFFNN(architecture)
         self.q2 = QFFNN(architecture)
 
-        self.optim_q1 = tc.optim.Adam(self.q1.parameters(), lr=lr)
-        self.optim_q2 = tc.optim.Adam(self.q2.parameters(), lr=lr)
+        self.optim_q1 = tc.optim.Adam(self.q1.parameters())
+        self.optim_q2 = tc.optim.Adam(self.q2.parameters())
         self.mse_loss: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
 
         self.q1_target = self.q1.clone()
@@ -99,10 +98,7 @@ class ScaledRewardLearner(nn.Module):
         self.n_actions = n_actions
         self.actions_onehot = tc.eye(n_actions, dtype=tc.int) # TODO check if this creates device problems
 
-        self.gamma = discount_factor
         self.rho = polyak
-
-        self.lr = lr
 
         self.set_device(device)
 
@@ -144,10 +140,7 @@ class ScaledRewardLearner(nn.Module):
             'q1_target': self.q1_target.state_dict(),
             'q2_target': self.q2_target.state_dict(),
 
-            'gamma': self.gamma,
             'rho': self.rho,
-
-            'lr': self.lr,
 
             'device': self.device,
         }
@@ -177,9 +170,7 @@ class ScaledRewardLearner(nn.Module):
         out = cls(
             architecture = model_dict['architecture'],
             n_actions = model_dict['n_actions'],
-            discount_factor = model_dict['gamma'],
             polyak = model_dict['rho'],
-            lr = model_dict['lr'],
             device = model_dict['device'],
         )
 
@@ -228,6 +219,8 @@ class ScaledRewardLearner(nn.Module):
         replay_buffer: ReplayBuffer,
         n_epochs: int,
         batch_size: int,
+        lr: float,
+        gamma: float,
         is_warmup: bool = False,
         verbose: bool = False,
     ):
@@ -235,13 +228,13 @@ class ScaledRewardLearner(nn.Module):
         mean_loss_q2 = 0
         mean_q = 0
 
+        self.optim_q1.param_groups[0]['lr'] = lr
+        self.optim_q2.param_groups[0]['lr'] = lr
+
         for _ in range(n_epochs):
             # sample from replay buffer
             to_tensor = lambda x: tc.stack(x)
             state, action, reward, next_state, terminated, truncated = map(to_tensor, replay_buffer.sample(batch_size))
-
-            # convert terminated to bool
-            terminated = terminated.to(tc.bool) # TODO do this in the training loop instead
 
             # compute target q-value for q-networks
             with tc.no_grad():
@@ -252,19 +245,14 @@ class ScaledRewardLearner(nn.Module):
                 # take those q-values with minimal absolute value instead of the plain minimum to also mitigate negative runoff
                 q_target = tc.min(q1_target, q2_target)
 
-                # decide gamma
-                gamma = 0 if is_warmup else self.gamma # TODO more variable implementation
-
                 # compute modified bellman function
                 y = reward.clone()
                 y[~terminated] *= (1 - gamma)
                 y[~terminated] += gamma * q_target
 
-
             # perform gradient step for q1-network
             q1 = self.q1(state, action)
             loss_q1 = self.mse_loss(y.detach(), q1)
-            assert not (loss_q1.isnan() or loss_q1.isinf()) # TODO remove?
             self.optim_q1.zero_grad()
             loss_q1.backward()
             self.optim_q1.step()
@@ -272,7 +260,6 @@ class ScaledRewardLearner(nn.Module):
             # perform gradient step for q2-network
             q2 = self.q2(state, action)
             loss_q2 = self.mse_loss(y.detach(), q2)
-            assert not (loss_q2.isnan() or loss_q2.isinf()) # TODO remove?
             self.optim_q2.zero_grad()
             loss_q2.backward()
             self.optim_q2.step()
@@ -308,9 +295,12 @@ def train_agent(
     n_episodes: int,
     n_steps_per_episode: int,
     n_train_epochs: int,
-    n_warmup_episodes: int,
+    # n_warmup_episodes: int,
     batch_size: int,
     replay_buffer: ReplayBuffer | int,
+    lr_fn: Callable[[int], float],
+    epsilon_fn: Callable[[int], float],
+    gamma_fn: Callable[[int], float],
     custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None = None,
     start_episode: int = 0,
     save_interval: int | None = None,
@@ -354,9 +344,6 @@ def train_agent(
         assert replay_buffer.n_fields == 6, "Replay buffer must have 6 fields!"
 
     for i in (trange if show_tqdm else range)(start_episode, n_episodes + start_episode):
-        # determine if this is a warmup episode
-        is_warmup = (i - start_episode < n_warmup_episodes)
-
         # reset simulation
         observation, _ = env.reset()
         state = _obs_to_state(observation, agent.device)
@@ -369,9 +356,12 @@ def train_agent(
 
         for t in range(n_steps_per_episode):
             # choose action
-            if is_warmup:
+            epsilon = epsilon_fn(i)
+            if np.random.rand() < epsilon:
+                # random action
                 action = env.action_space.sample()
             else:
+                # greedy action
                 with tc.no_grad():
                     action = agent.act(state)
 
@@ -404,10 +394,20 @@ def train_agent(
 
         # train agent
         if len(replay_buffer) >= batch_size:
-            agent.train()
-            l_q1, l_q2, *verbose = agent.training_session(replay_buffer, n_train_epochs, batch_size, is_warmup = is_warmup, verbose = use_mlflow)
+            lr = lr_fn(i)
+            gamma = gamma_fn(i)
 
-            # log losses
+            agent.train()
+            l_q1, l_q2, *verbose = agent.training_session(
+                replay_buffer = replay_buffer,
+                n_epochs = n_train_epochs,
+                batch_size = batch_size,
+                lr = lr,
+                gamma = gamma,
+                verbose = use_mlflow
+            )
+
+            # log training metrics
             if use_mlflow:
                 q, *_ = verbose
                 mlflow.log_metric("loss_q1", l_q1, step=i)
@@ -417,6 +417,8 @@ def train_agent(
                 mlflow.log_metric("weight_q2", float(agent.q2.layers[0].weight[0,0]), step=i) # type: ignore
                 mlflow.log_metric("weight_q1_target", float(agent.q1_target.layers[0].weight[0,0]), step=i) # type: ignore
                 mlflow.log_metric("weight_q2_target", float(agent.q2_target.layers[0].weight[0,0]), step=i) # type: ignore
+                mlflow.log_metric("lr", lr, step=i)
+                mlflow.log_metric("gamma", gamma, step=i)
 
         # log auxiliary metrics
         if use_mlflow:
@@ -424,7 +426,7 @@ def train_agent(
             mlflow.log_metric("episode_length", t+1, step=i)
             mlflow.log_metric("mean_reward", total_reward / (t+1), step=i)
             mlflow.log_metric("buffer_size", len(replay_buffer), step=i)
-            mlflow.log_metric("is_warmup", int(is_warmup), step=i)
+            mlflow.log_metric("epsilon", epsilon, step=i)
 
         # save model at regular intervals and at the very end
         if save_interval is not None and ((i+1) % save_interval == 0 or i+1 == n_episodes + start_episode):
