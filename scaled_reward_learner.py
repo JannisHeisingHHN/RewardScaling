@@ -72,6 +72,19 @@ class QFFNN(FFNN):
         return idc
 
 
+def _bellmann_std(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
+    '''Standard Bellman function (status quo)'''
+    return reward + gamma * future_reward
+
+
+def _bellmann_scaled(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
+    '''Modified Bellman function with appropriate reward scaling (my new method)'''
+    out = reward.clone()
+    out[~terminated] *= (1 - gamma)
+    out[~terminated] += gamma * future_reward
+
+    return out
+
 
 class ScaledRewardLearner(nn.Module):
     def __init__(
@@ -79,6 +92,7 @@ class ScaledRewardLearner(nn.Module):
         architecture: list[int | nn.Module],
         n_actions: int,
         polyak: float,
+        use_reward_scaling: bool,
         device: Device,
         *args,
         **kwargs
@@ -96,9 +110,14 @@ class ScaledRewardLearner(nn.Module):
         self.q2_target = self.q2.clone()
 
         self.n_actions = n_actions
-        self.actions_onehot = tc.eye(n_actions, dtype=tc.int) # TODO check if this creates device problems
+        self.actions_onehot = tc.eye(n_actions, dtype=tc.int)
 
         self.rho = polyak
+
+        # The following if-else morally belongs in training_session as its purpose is to determine how to calculate the Q-functions' targets,
+        # but because I'm obsessed with runtime optimization I moved it here
+        self.bellman_fn = _bellmann_scaled if use_reward_scaling else _bellmann_std
+        self.use_reward_scaling = use_reward_scaling
 
         self.set_device(device)
 
@@ -107,6 +126,8 @@ class ScaledRewardLearner(nn.Module):
         self.to(device)
         self.actions_onehot = self.actions_onehot.to(device)
         self.device = device
+
+        return self
 
 
     def save(self, path_to_dir: str | Path, epoch: int, move_to_cpu: bool = True):
@@ -121,7 +142,7 @@ class ScaledRewardLearner(nn.Module):
         # create folder if necessary
         path_to_dir.mkdir(parents=True, exist_ok=True)
 
-        # move model to cpu TODO check if this slows down training significantly
+        # move model to cpu
         if move_to_cpu:
             old_device = self.device
             self.set_device("cpu")
@@ -141,6 +162,7 @@ class ScaledRewardLearner(nn.Module):
             'q2_target': self.q2_target.state_dict(),
 
             'rho': self.rho,
+            'use_reward_scaling': self.use_reward_scaling,
 
             'device': self.device,
         }
@@ -171,6 +193,7 @@ class ScaledRewardLearner(nn.Module):
             architecture = model_dict['architecture'],
             n_actions = model_dict['n_actions'],
             polyak = model_dict['rho'],
+            use_reward_scaling = model_dict['use_reward_scaling'],
             device = model_dict['device'],
         )
 
@@ -246,9 +269,7 @@ class ScaledRewardLearner(nn.Module):
                 q_target = tc.min(q1_target, q2_target)
 
                 # compute modified bellman function
-                y = reward.clone()
-                y[~terminated] *= (1 - gamma)
-                y[~terminated] += gamma * q_target
+                y = self.bellman_fn(reward, q_target, gamma, terminated)
 
             # perform gradient step for q1-network
             q1 = self.q1(state, action)

@@ -7,6 +7,7 @@ import gymnasium as gym
 from scaled_reward_learner import ScaledRewardLearner, train_agent, _obs_to_state
 from replay_buffer import ReplayBuffer
 
+from typing import Callable
 from torch.types import Tensor
 from numpy.typing import NDArray
 
@@ -16,9 +17,13 @@ DEVICE = "cuda" if tc.cuda.is_available() else "cpu"
 print(f"Device: {DEVICE}")
 
 
+# TODO: There's an issue when loading snapshots onto gpu and continuing training as some tensor is still on cpu and I can't figure out which one
+
+
 # decide whether to use mlflow
-use_mlflow = False
-mlflow_info_tag = "Training continuation test"
+use_mlflow = True
+mlflow_run_name = "Name test"
+mlflow_info_tag = ""
 
 # mlflow_uri = "http://127.0.0.1:8080"
 # mlflow_experiment = "SRL_MountainCar-v0"
@@ -27,7 +32,7 @@ mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_MountainCar-v0"
 
 if use_mlflow:
-    print(f"MLFlow: {mlflow_uri} | {mlflow_experiment} | {mlflow_info_tag}")
+    print(f"MLFlow: {mlflow_uri} | {mlflow_experiment} | {mlflow_run_name}")
 else:
     print("MLFlow: False")
 
@@ -41,28 +46,29 @@ params = {
     },
 
     # model architecture (excluding input & output size since these are determined by the environment)
-    'architecture_hidden': [256, nn.BatchNorm1d(256), 256],
+    'architecture_hidden': [512, nn.BatchNorm1d(512), 512],
 
     # training lengths
-    'n_episodes': 1500,
-    'n_steps_per_episode': 195,
+    'n_episodes': 7000,
+    'n_steps_per_episode': 197,
     'n_train_epochs': 5, # training cycles per epoch
     'batch_size': 1013,
 
-    # rates & coefficients
+    # model parameters
     'polyak_coefficient': 0.005,
+    'use_reward_scaling': False,
 
     # replay buffer
     'replay_buffer_size': 100_000,
 
     # save parameters
-    'start_episode': 100,
+    'start_episode': 0,
     'save_interval': 50,
     'save_path': "weights/srl_mountaincar",
 }
 
 
-# Initialise agent
+# Initialize agent
 env: gym.vector.SyncVectorEnv = gym.make_vec(**params['env'], vectorization_mode="sync") # type: ignore
 
 if (se := params['start_episode']) > 0:
@@ -76,37 +82,52 @@ else:
         architecture = [state_size + action_size] + params['architecture_hidden'] + [1],
         n_actions = int(env.action_space.nvec[0]), # type: ignore
         polyak = params['polyak_coefficient'],
+        use_reward_scaling=params['use_reward_scaling'],
         device = DEVICE,
     )
 
 replay_buffer = ReplayBuffer(6, params['replay_buffer_size'])
 
-# the docstrings are used as the parameter value for mlflow
+
+# Set variable parameters. The docstrings are used as the parameter value for mlflow
+def get_logistic_fn(start: float, end: float, midpoint: float, rate: float) -> Callable[[float], float]:
+    '''
+    Create a logistic function of the form `f(x) = start + (end - start) / (1 + exp(-rate*(x - midpoint)))`<br>.
+    This function satisfies `f(-∞) = start`, `f(∞) = end`. If `midpoint` is reasonably large, then `f(0) ≈ start`.
+    '''
+    out = lambda x: start + (end - start) / (1 + np.exp(-rate*(x - midpoint)))
+    out.__doc__ = f"logistic_fn({start=}, {end=}, {midpoint=}, {rate=})"
+    return out
+
+
 def lr_fn(epoch: int):
-    '''lr = 3e-4 * (1 - 1e-6)**epoch'''
-    lr = 3e-4 * (1 - 1e-6)**epoch
+    '''lr = 3e-4 * (1 - 3e-4)**epoch'''
+    lr = 3e-4 * (1 - 3e-4)**epoch
 
     return float(lr)
 
 
-def epsilon_fn(epoch: int):
-    '''eps = (eps_start - eps_end) * np.exp(-epoch * eps_v) + eps_end'''
-    eps_start = 0.9
-    eps_end = 0.05
-    eps_v = 0.005 # velocity
-    eps = (eps_start - eps_end) * np.exp(-epoch * eps_v) + eps_end
+# def epsilon_fn(epoch: int):
+#     '''eps = (eps_start - eps_end) * np.exp(-epoch * eps_v) + eps_end'''
+#     eps_start = 0.9
+#     eps_end = 0.05
+#     eps_v = 0.005 # velocity
+#     eps = (eps_start - eps_end) * np.exp(-epoch * eps_v) + eps_end
 
-    return float(eps)
+#     return float(eps)
 
 
-def gamma_fn(epoch: int):
-    '''gamma = (gamma_start - gamma_end) * np.exp(-epoch * gamma_v) + gamma_end'''
-    gamma_start = 0.0
-    gamma_end = 0.99
-    gamma_v = 0.002 # velocity
-    gamma = (gamma_start - gamma_end) * np.exp(-epoch * gamma_v) + gamma_end
+# def gamma_fn(epoch: int):
+#     '''gamma = (gamma_start - gamma_end) * np.exp(-epoch * gamma_v) + gamma_end'''
+#     gamma_start = 0.0
+#     gamma_end = 0.99
+#     gamma_v = 0.002 # velocity
+#     gamma = (gamma_start - gamma_end) * np.exp(-epoch * gamma_v) + gamma_end
 
-    return float(gamma)
+#     return float(gamma)
+
+epsilon_fn = get_logistic_fn(1, 0.05, 2000, 0.001)
+gamma_fn = get_logistic_fn(0, 0.99, 2500, 0.0015)
 
 
 def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray):
@@ -125,13 +146,14 @@ if use_mlflow:
     mlflow.set_tracking_uri(mlflow_uri)
     mlflow.set_experiment(mlflow_experiment)
 
-    with mlflow.start_run():
+    with mlflow.start_run(run_name=mlflow_run_name):
         mlflow.log_params(params)
         mlflow.log_param("lr_fn", lr_fn.__doc__)
         mlflow.log_param("epsilon_fn", epsilon_fn.__doc__)
         mlflow.log_param("gamma_fn", gamma_fn.__doc__)
         mlflow.log_param("custom_reward", custom_reward.__doc__)
-        mlflow.set_tag("Info", mlflow_info_tag)
+        if len(mlflow_info_tag) > 0:
+            mlflow.set_tag("Info", mlflow_info_tag)
 
         try:
             train_agent(
