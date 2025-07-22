@@ -8,8 +8,12 @@ from scaled_reward_learner import ScaledRewardLearner, train_agent, _obs_to_stat
 from replay_buffer import ReplayBuffer
 
 from typing import Callable
-from torch.types import Tensor
+from torch import Tensor
 from numpy.typing import NDArray
+
+# torch.load doesn't know that BatchNorm is safe and raises an error by default (to prevent arbitrary code execution),
+# so we list it as safe here
+tc.serialization.add_safe_globals([nn.BatchNorm1d])
 
 
 DEVICE = "cuda" if tc.cuda.is_available() else "cpu"
@@ -17,11 +21,8 @@ DEVICE = "cuda" if tc.cuda.is_available() else "cpu"
 print(f"Device: {DEVICE}")
 
 
-# TODO: There's an issue when loading snapshots onto gpu and continuing training as some tensor is still on cpu and I can't figure out which one
-
-
 # decide whether to use mlflow
-use_mlflow = True
+use_mlflow = False
 mlflow_run_name = "Name test"
 mlflow_info_tag = ""
 
@@ -56,7 +57,7 @@ params = {
 
     # model parameters
     'polyak_coefficient': 0.005,
-    'use_reward_scaling': False,
+    'use_reward_scaling': True,
 
     # replay buffer
     'replay_buffer_size': 100_000,

@@ -1,7 +1,6 @@
 import numpy as np
 import torch as tc
 from torch import nn
-from torch.nn.functional import one_hot
 
 import gymnasium as gym
 
@@ -9,11 +8,11 @@ from ffnn import FFNN
 from replay_buffer import ReplayBuffer
 
 from pathlib import Path
-import pickle
 
 from typing import Callable
 from numpy.typing import NDArray
-from torch.types import Device, Tensor
+from torch.types import Device
+from torch import Tensor
 
 
 class QFFNN(FFNN):
@@ -74,7 +73,10 @@ class QFFNN(FFNN):
 
 def _bellmann_std(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
     '''Standard Bellman function (status quo)'''
-    return reward + gamma * future_reward
+    out = reward.clone()
+    out[~terminated] += gamma * future_reward
+
+    return out
 
 
 def _bellmann_scaled(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
@@ -114,8 +116,8 @@ class ScaledRewardLearner(nn.Module):
 
         self.rho = polyak
 
-        # The following if-else morally belongs in training_session as its purpose is to determine how to calculate the Q-functions' targets,
-        # but because I'm obsessed with runtime optimization I moved it here
+        # The following if-else morally belongs in training_session (where self.bellman_fn is used) as its purpose is to determine
+        # how to calculate the Q-functions' targets, but because I'm obsessed with runtime optimization I moved it here
         self.bellman_fn = _bellmann_scaled if use_reward_scaling else _bellmann_std
         self.use_reward_scaling = use_reward_scaling
 
@@ -130,7 +132,7 @@ class ScaledRewardLearner(nn.Module):
         return self
 
 
-    def save(self, path_to_dir: str | Path, epoch: int, move_to_cpu: bool = True):
+    def save(self, path_to_dir: str | Path, epoch: int):
         '''Save model to a single .pth file'''
         # make sure path is of type Path
         if not isinstance(path_to_dir, Path):
@@ -141,11 +143,6 @@ class ScaledRewardLearner(nn.Module):
 
         # create folder if necessary
         path_to_dir.mkdir(parents=True, exist_ok=True)
-
-        # move model to cpu
-        if move_to_cpu:
-            old_device = self.device
-            self.set_device("cpu")
 
         # put all model data into a single dictionary
         model_dict = {
@@ -168,12 +165,7 @@ class ScaledRewardLearner(nn.Module):
         }
 
         # save dictionary to file
-        with open(path_to_dir / f"epoch_{epoch}.pth", "wb") as f:
-            pickle.dump(model_dict, f)
-        
-        # move model back to original device
-        if move_to_cpu:
-            self.set_device(old_device)
+        tc.save(model_dict, path_to_dir / f"epoch_{epoch}.pth")
 
 
     @classmethod
@@ -186,8 +178,7 @@ class ScaledRewardLearner(nn.Module):
         # make sure path points to a directory
         assert path_to_dir.suffix == "", "path_to_dir must point to a directory!"
 
-        with open(path_to_dir / f"epoch_{epoch}.pth", "rb") as f:
-            model_dict = pickle.load(f)
+        model_dict = tc.load(path_to_dir / f"epoch_{epoch}.pth", map_location=device) # type: ignore
 
         out = cls(
             architecture = model_dict['architecture'],
@@ -214,7 +205,6 @@ class ScaledRewardLearner(nn.Module):
     def act(self, state: tc.Tensor) -> NDArray:
         '''Let the policy choose an action'''
         # choose action
-        # action: tc.Tensor = self.pi(state)[0]
         q1 = self.q1.get_q(state, self.actions_onehot)
         q2 = self.q2.get_q(state, self.actions_onehot)
 
@@ -262,13 +252,13 @@ class ScaledRewardLearner(nn.Module):
             # compute target q-value for q-networks
             with tc.no_grad():
                 # gauge q-values
-                q1_target = self.q1_target.get_max_q(next_state, self.actions_onehot)
-                q2_target = self.q2_target.get_max_q(next_state, self.actions_onehot)
+                q1_target = self.q1_target.get_max_q(next_state[~terminated], self.actions_onehot)
+                q2_target = self.q2_target.get_max_q(next_state[~terminated], self.actions_onehot)
 
                 # take those q-values with minimal absolute value instead of the plain minimum to also mitigate negative runoff
                 q_target = tc.min(q1_target, q2_target)
 
-                # compute modified bellman function
+                # compute bellman function
                 y = self.bellman_fn(reward, q_target, gamma, terminated)
 
             # perform gradient step for q1-network
@@ -407,7 +397,7 @@ def train_agent(
             else:
                 replay_buffer.add(state, action, reward, next_state, terminated, truncated)
 
-            # if done (e.g. because the walker tipped over), stop the episode
+            # if done, stop the episode
             # Alternatively, one could reset the environment and keep the episode going,
             # but that would mess with the total_reward metric
             if terminated.any() or truncated.any(): # TODO: make this work with parallelization and variable episode length
