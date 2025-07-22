@@ -160,8 +160,6 @@ class ScaledRewardLearner(nn.Module):
 
             'rho': self.rho,
             'use_reward_scaling': self.use_reward_scaling,
-
-            'device': self.device,
         }
 
         # save dictionary to file
@@ -185,7 +183,7 @@ class ScaledRewardLearner(nn.Module):
             n_actions = model_dict['n_actions'],
             polyak = model_dict['rho'],
             use_reward_scaling = model_dict['use_reward_scaling'],
-            device = model_dict['device'],
+            device = device,
         )
 
         out.q1.load_state_dict(model_dict['q1'])
@@ -196,8 +194,6 @@ class ScaledRewardLearner(nn.Module):
 
         out.q1_target.load_state_dict(model_dict['q1_target'])
         out.q2_target.load_state_dict(model_dict['q2_target'])
-
-        out.set_device(device)
 
         return out
 
