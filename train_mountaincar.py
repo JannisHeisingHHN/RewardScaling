@@ -23,7 +23,7 @@ print(f"Device: {DEVICE}")
 
 # decide whether to use mlflow
 use_mlflow = False
-mlflow_run_name = "Name test"
+mlflow_run_name = "Height reward, with scaling"
 mlflow_info_tag = ""
 
 # mlflow_uri = "http://127.0.0.1:8080"
@@ -133,8 +133,8 @@ gamma_fn = get_logistic_fn(0, 0.99, 2500, 0.0015)
 
 def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray):
     '''reward = x_pos + flag_bonus'''
-    x_pos = state[:, 0] + 0.524 # x-position of cart
-    pos_reward = np.where(x_pos > 0, x_pos, 0) # only give reward when moving to the right of the valley
+    x_pos = state[:, 0] # x-position of cart
+    pos_reward = np.sin(3 * x_pos) # give reward based on achieved height
     flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the x-position
     reward = pos_reward + flag_bonus
 
