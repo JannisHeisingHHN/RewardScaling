@@ -11,10 +11,6 @@ from typing import Callable
 from torch import Tensor
 from numpy.typing import NDArray
 
-# torch.load doesn't know that BatchNorm is safe and raises an error by default (to prevent arbitrary code execution),
-# so we list it as safe here
-tc.serialization.add_safe_globals([nn.BatchNorm1d])
-
 
 DEVICE = "cuda" if tc.cuda.is_available() else "cpu"
 # DEVICE = "cpu"
@@ -74,7 +70,10 @@ env: gym.vector.SyncVectorEnv = gym.make_vec(**params['env'], vectorization_mode
 
 if (se := params['start_episode']) > 0:
     print(f"Loading from epoch {se}")
-    agent = ScaledRewardLearner.load(params['save_path'], se, DEVICE)
+
+    # torch.load doesn't know that BatchNorm is safe and raises an error by default (to prevent arbitrary code execution)
+    with tc.serialization.safe_globals([nn.BatchNorm1d]):
+        agent = ScaledRewardLearner.load(params['save_path'], se, DEVICE)
 else:
     state_size = env.observation_space.shape[-1] # type: ignore
     action_size = int(env.action_space.nvec[0]) # type: ignore
