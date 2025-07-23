@@ -133,9 +133,10 @@ gamma_fn = get_logistic_fn(0, 0.99, 2500, 0.0015)
 
 def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray):
     '''reward = x_pos + flag_bonus'''
-    x_pos = state[:, 0] # x-position of cart
+    x_pos = state[:, 0] + 0.524 # x-position of cart
+    pos_reward = np.where(x_pos > 0, x_pos, 0) # only give reward when moving to the right of the valley
     flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the x-position
-    reward = x_pos + flag_bonus
+    reward = pos_reward + flag_bonus
 
     return reward
 
