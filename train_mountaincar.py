@@ -4,13 +4,14 @@ from torch import nn
 
 import gymnasium as gym
 
-from scaled_reward_learner import ScaledRewardLearner, train_agent, _obs_to_state
-from replay_buffer import ReplayBuffer
+from agents import *
 
 from typing import Callable
+from torch.types import Device
 from torch import Tensor
 from numpy.typing import NDArray
 
+from pathlib import Path
 import toml
 
 #
@@ -34,7 +35,7 @@ def lr_fn(epoch: int): # TODO: add to settings.toml
 
     return float(lr)
 
-def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray): # TODO: addto settings.toml?
+def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray): # TODO: add to settings.toml?
     '''reward = y_pos + flag_bonus'''
     x_pos = state[:, 0] # x-position of cart
     pos_reward = np.sin(3 * x_pos) # give reward based on achieved height
@@ -44,9 +45,152 @@ def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray): # 
     return reward
 
 
+def obs_to_state(obs, device: Device):
+    '''Converts output from a gym environment to a suitable tensor'''
+    state = tc.tensor(obs, dtype=tc.float, device=device)
+    return state
+
+
+def train_agent(
+    env: gym.vector.SyncVectorEnv,
+    agent: Learner,
+    n_episodes: int,
+    n_steps_per_episode: int,
+    n_train_epochs: int,
+    batch_size: int,
+    replay_buffer: ReplayBuffer | int,
+    lr_fn: Callable[[int], float],
+    epsilon_fn: Callable[[int], float],
+    gamma_fn: Callable[[int], float],
+    custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None = None,
+    start_episode: int = 0,
+    save_interval: int | None = None,
+    save_path: str | Path | None = None,
+    show_tqdm: bool = True,
+    use_mlflow: bool = True,
+):
+    '''
+    Training algorithm for a Q-learning agent in a gym environment with a discrete action space
+
+    * custom_reward: Maps `(observation, action, game_reward)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
+    '''
+    # make sure that the action space has the right properties
+    assert isinstance(env.action_space, gym.spaces.Discrete) or isinstance(env.action_space, gym.spaces.MultiDiscrete), "Action space must be discrete!"
+
+    # make sure the save params makes sense
+    assert (save_interval is None) == (save_path is None), "Parameters 'save_interval' and 'save_path' must either both be given or both be None!"
+
+    # define reward function
+    reward_fn = (
+            (lambda o, a, r: r) # only use game reward
+        if custom_reward is None else
+            (lambda o, a, r: custom_reward(o, a, r)) # use custom reward
+    )
+
+    # save untrained model
+    if start_episode == 0 and save_path is not None:
+        agent.save(save_path, 0)
+
+    # import optional libraries
+    if show_tqdm: from tqdm import trange
+    if use_mlflow: import mlflow
+
+    # initialize replay buffer
+    if isinstance(replay_buffer, int):
+        replay_buffer = ReplayBuffer(6, maxlen=replay_buffer)
+    else:
+        assert replay_buffer.n_fields == 6, "Replay buffer must have 6 fields!"
+
+    # create action lookup
+    n_actions = int(env.action_space.nvec[0]) # type: ignore
+    actions_onehot = tc.eye(n_actions, dtype=tc.int, device=agent.device)
+
+    for i in (trange if show_tqdm else range)(start_episode, n_episodes + start_episode):
+        # reset simulation
+        observation, _ = env.reset()
+        state = obs_to_state(observation, agent.device)
+
+        # reset total reward per episode
+        total_reward = 0.
+
+        # set agent to eval mode for the duration of the episode
+        agent.eval()
+
+        for t in range(n_steps_per_episode):
+            # choose action
+            epsilon = epsilon_fn(i)
+            if np.random.rand() < epsilon:
+                # random action
+                action = env.action_space.sample()
+            else:
+                # greedy action
+                with tc.no_grad():
+                    action = agent.act(state, actions_onehot)
+
+            # perform action
+            observation, _reward, _terminated, _truncated, info, *_ = env.step(action)
+
+            # convert values to tensors (the detaches are quite probably unnecessary TODO remove?)
+            state = state.detach()
+            old_action = action
+            action = actions_onehot[action].detach()
+            next_state = obs_to_state(observation, agent.device).detach()
+            reward = tc.tensor(reward_fn(observation, action, _reward), dtype=tc.float, device=agent.device).detach()
+            terminated = tc.tensor(_terminated, dtype=tc.bool, device=agent.device).detach()
+            truncated = tc.tensor(_truncated, dtype=tc.bool, device=agent.device).detach()
+
+            # accumulate total reward
+            total_reward += float(tc.mean(reward)) # type: ignore
+
+            # save to buffer
+            replay_buffer.add_iter(state, action, reward, next_state, terminated, truncated)
+
+            # if done, stop the episode
+            # Alternatively, one could reset the environment and keep the episode going,
+            # but that would mess with the total_reward metric
+            if terminated.any() or truncated.any(): # TODO: make this work with parallelization and variable episode length
+                break
+
+        # train agent
+        if len(replay_buffer) >= batch_size:
+            lr = lr_fn(i)
+            gamma = gamma_fn(i)
+
+            agent.train()
+            train_metrics = agent.training_session(
+                replay_buffer = replay_buffer,
+                n_epochs = n_train_epochs,
+                batch_size = batch_size,
+                lr = lr,
+                gamma = gamma,
+            )
+
+            # log training metrics
+            if use_mlflow:
+                mlflow.log_metric("lr", lr, step=i)
+                mlflow.log_metric("gamma", gamma, step=i)
+                mlflow.log_metrics(train_metrics)
+                mlflow.log_metrics(agent.mlflow_get_sample_weights())
+
+        # log auxiliary metrics
+        if use_mlflow:
+            mlflow.log_metric("total_reward", total_reward, step=i)
+            mlflow.log_metric("episode_length", t+1, step=i)
+            mlflow.log_metric("mean_reward", total_reward / (t+1), step=i)
+            mlflow.log_metric("buffer_size", len(replay_buffer), step=i)
+            mlflow.log_metric("epsilon", epsilon, step=i)
+
+        # save model at regular intervals and at the very end
+        if save_interval is not None and ((i+1) % save_interval == 0 or i+1 == n_episodes + start_episode):
+            agent.save(save_path, i+1) # type: ignore (it is guaranteed that save_path is not None)
+
+        # update state
+        state = next_state
+
+
 def main(settings: dict):
     # load settings
-    DEVICE = settings['setup']['device']
+    DEVICE = settings['setup']['device'] # TODO: add option to list several devices (e.g. ["cuda:1", "cuda"]) so that I don't have to change the device on jupyterlab
 
     use_mlflow = settings['setup']['use_mlflow']
     mlflow_run_name = settings['setup']['mlflow_run_name']
@@ -69,22 +213,25 @@ def main(settings: dict):
     else:
         print("MLFlow: False")
 
-    # initialize agent
+    # initialize environment
     env: gym.vector.SyncVectorEnv = gym.make_vec(**params['env'], vectorization_mode="sync") # type: ignore
+    state_size = env.observation_space.shape[-1] # type: ignore
+    n_actions = int(env.action_space.nvec[0]) # type: ignore
+
+    # initialize agent
+    ModelClass: type[Learner] = eval(params['model_class'])
 
     if (se := params['start_episode']) > 0:
         print(f"Loading from epoch {se}")
 
         # torch.load doesn't know that BatchNorm is safe and raises an error by default (to prevent arbitrary code execution)
         with tc.serialization.safe_globals([nn.BatchNorm1d]):
-            agent = ScaledRewardLearner.load(params['save_path'], se, DEVICE)
+            agent = ModelClass.load(params['save_path'], se, DEVICE)
     else:
-        state_size = env.observation_space.shape[-1] # type: ignore
-        action_size = int(env.action_space.nvec[0]) # type: ignore
 
-        agent = ScaledRewardLearner(
-            architecture = [state_size + action_size] + architecture_hidden + [1],
-            n_actions = int(env.action_space.nvec[0]), # type: ignore
+        agent = ModelClass(
+            architecture = [state_size + n_actions] + architecture_hidden + [1],
+            n_actions = n_actions,
             polyak = params['polyak_coefficient'],
             use_reward_scaling=params['use_reward_scaling'],
             device = DEVICE,

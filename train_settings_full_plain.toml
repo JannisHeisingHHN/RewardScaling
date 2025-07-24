@@ -1,7 +1,7 @@
 [setup]
 device = "cuda"
 use_mlflow = true
-mlflow_run_name = "Scaled, height reward"
+mlflow_run_name = "Full | Plain | Lorem"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_MountainCar-v0"
@@ -23,11 +23,12 @@ n_train_epochs = 5 # training cycles per epoch
 batch_size = 1013
 
 # model parameters
+model_class = "ScaledRewardLearner"
 polyak_coefficient = 0.005
-use_reward_scaling = true
+use_reward_scaling = false
 
 # variable parameters
-gamma = {start = 0, end = 0.99, midpoint = 2500, rate = 0.0015}
+gamma = {start = 0.99, end = 0.99, midpoint = 2500, rate = 0.0015}
 epsilon = {start = 1, end = 0.05, midpoint = 2000, rate = 0.001}
 
 # replay buffer
@@ -36,4 +37,4 @@ replay_buffer_size = 100_000
 # save parameters
 start_episode = 0
 save_interval = 100
-save_path = "weights/srl_mountaincar_scaled"
+save_path = "weights/srl_mountaincar_plain"
