@@ -190,8 +190,6 @@ def train_agent(
 
 def main(settings: dict):
     # load settings
-    DEVICE = settings['setup']['device'] # TODO: add option to list several devices (e.g. ["cuda:1", "cuda"]) so that I don't have to change the device on jupyterlab
-
     use_mlflow = settings['setup']['use_mlflow']
     mlflow_run_name = settings['setup']['mlflow_run_name']
     mlflow_uri = settings['setup']['mlflow_uri']
@@ -206,6 +204,25 @@ def main(settings: dict):
     # the model architecture needs to be evaluated
     architecture_hidden = [eval(layer) for layer in params['architecture_hidden']]
 
+    # determine device
+    devices: str | list[str] = settings['setup']['device']
+
+    if isinstance(devices, str):
+        # single device given
+        devices = [devices]
+
+    # choose the first device that is available
+    for d in devices:
+        try:
+            _ = tc.tensor(0, device=d) # this would throw the error
+            DEVICE = str(d) # device deemed available
+            break
+        except RuntimeError:
+            pass
+    else:
+        # default device: cpu
+        DEVICE = "cpu"
+
     # print info
     print(f"Device: {DEVICE}")
     if use_mlflow:
@@ -214,7 +231,7 @@ def main(settings: dict):
         print("MLFlow: False")
 
     # initialize environment
-    env: gym.vector.SyncVectorEnv = gym.make_vec(**params['env'], vectorization_mode="sync") # type: ignore
+    env = gym.vector.SyncVectorEnv([lambda: gym.make(**params['env'])] * params['num_envs'])
     state_size = env.observation_space.shape[-1] # type: ignore
     n_actions = int(env.action_space.nvec[0]) # type: ignore
 

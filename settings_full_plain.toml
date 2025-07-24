@@ -1,0 +1,41 @@
+[setup]
+device = ["cuda:1", "cuda"]
+use_mlflow = true
+mlflow_run_name = "Full—Plain—Lorem"
+
+mlflow_uri = "http://10.30.20.11:5000"
+mlflow_experiment = "jheis_SRL_MountainCar-v0"
+
+
+[parameters] # these are logged in mlflow
+
+# environment
+env = {id = "MountainCar-v0", max_episode_steps = 500}
+num_envs = 11
+
+# model architecture (excluding input & output size since these are determined by the environment)
+# because TOML doesn't support heterogeneous arrays, all entries must be strings, which are passed through eval()
+architecture_hidden = ["512", "nn.BatchNorm1d(512)", "512"]
+
+# training lengths
+n_episodes = 7000
+n_steps_per_episode = 500
+n_train_epochs = 5 # training cycles per epoch
+batch_size = 1013
+
+# model parameters
+model_class = "ScaledRewardLearner"
+polyak_coefficient = 0.005
+use_reward_scaling = false
+
+# variable parameters
+gamma = {start = 0.99, end = 0.99, midpoint = 2500, rate = 0.0015}
+epsilon = {start = 1, end = 0.05, midpoint = 2000, rate = 0.001}
+
+# replay buffer
+replay_buffer_size = 100_000
+
+# save parameters
+start_episode = 0
+save_interval = 100
+save_path = "weights/full_plain"
