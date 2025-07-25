@@ -16,7 +16,7 @@ num_envs = 11
 
 # model architecture (excluding input & output size since these are determined by the environment)
 # because TOML doesn't support heterogeneous arrays, all entries must be strings, which are passed through eval()
-architecture_hidden = ["512", "nn.BatchNorm1d(512)", "512"]
+architecture_hidden = ["256", "nn.BatchNorm1d(256)", "256"]
 
 # training lengths
 n_episodes = 7000
@@ -30,7 +30,7 @@ polyak_coefficient = 0.005
 use_reward_scaling = true
 
 # variable parameters
-gamma = {start = 0, end = 0.97, midpoint = 2500, rate = 0.0015}
+gamma = {start = 0, end = 0.95, midpoint = 1500, rate = 0.002}
 epsilon = {start = 1, end = 0.05, midpoint = 2000, rate = 0.001}
 
 # replay buffer

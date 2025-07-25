@@ -1,10 +1,10 @@
 from train import start_training
 import toml
 import multiprocessing as mp
+from tqdm import tqdm
 
-
-# list of settings that are to be executed
-settings_paths = ["settings_full_plain.toml", "settings_full_scaled.toml", "settings_single_plain.toml", "settings_single_scaled.toml"]
+# this line is supposed to make tqdm bar placement more consistent, but I'm sceptical
+tqdm.set_lock(mp.RLock())
 
 
 def clone_dict(d: dict):
@@ -15,17 +15,18 @@ def clone_dict(d: dict):
             out[k] = clone_dict(v)
         else:
             out[k] = v
-    
+
     return out
 
 
-def main():
+def run_experiments(settings_paths: list[str]):
     # load and preprocess all settings files
     settings_ready = []
     for i, sp in enumerate(settings_paths):
         try:
             # I don't quite understand why, but I can't pass the dictionary created by toml.load to a subprocess as it can't access
-            # the nested dictionaries within. Instead, I have to create a deep copy of the dictionary and pass that
+            # the nested dictionaries within. Instead, I have to create a deep copy of the dictionary and pass that.
+            # Using copy.deepcopy doesn't work.
             settings = clone_dict(toml.load(sp))
         except FileNotFoundError:
             print(f"Settings file '{sp}' was not found!")
@@ -46,7 +47,7 @@ def main():
     # start processes
     processes: list[mp.Process] = []
     for sr in settings_ready:
-        p = mp.Process(target=start_training, args=(clone_dict(sr),))
+        p = mp.Process(target=start_training, args=(sr,))
         p.start()
         processes.append(p)
 
@@ -56,4 +57,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # list of settings that are to be executed
+    # settings_paths = ["settings_full_plain.toml", "settings_full_scaled.toml", "settings_single_plain.toml", "settings_single_scaled.toml"]
+    settings_paths = ["test_settings.toml", "test_settings2.toml"]
+    run_experiments(settings_paths)
