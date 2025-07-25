@@ -6,7 +6,7 @@ import gymnasium as gym
 
 from agents import *
 
-from typing import Callable
+from typing import Callable, Any
 from torch.types import Device
 from torch import Tensor
 from numpy.typing import NDArray
@@ -67,13 +67,14 @@ def train_agent(
     start_episode: int = 0,
     save_interval: int | None = None,
     save_path: str | Path | None = None,
-    show_tqdm: bool = True,
+    show_tqdm: dict[str, Any] | bool = True,
     use_mlflow: bool = True,
 ):
     '''
     Training algorithm for a Q-learning agent in a gym environment with a discrete action space
 
     * custom_reward: Maps `(observation, action, game_reward)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
+    * show_tqdm: Whether to use the tqm progress bar. May also be a dictionary of arguments, which are then passed to `trange`.
     '''
     # make sure that the action space has the right properties
     assert isinstance(env.action_space, gym.spaces.Discrete) or isinstance(env.action_space, gym.spaces.MultiDiscrete), "Action space must be discrete!"
@@ -106,7 +107,19 @@ def train_agent(
     n_actions = int(env.action_space.nvec[0]) # type: ignore
     actions_onehot = tc.eye(n_actions, dtype=tc.int, device=agent.device)
 
-    for i in (trange if show_tqdm else range)(start_episode, n_episodes + start_episode):
+    # select iterator
+    start = start_episode
+    stop = n_episodes + start_episode
+
+    if isinstance(show_tqdm, dict):
+        iterator = trange(start, stop, **show_tqdm)
+    elif show_tqdm:
+        iterator = trange(start, stop)
+    else:
+        iterator = range(start, stop)
+
+    # run training
+    for i in iterator:
         # reset simulation
         observation, _ = env.reset()
         state = obs_to_state(observation, agent.device)
@@ -188,12 +201,13 @@ def train_agent(
         state = next_state
 
 
-def main(settings: dict):
+def start_training(settings: dict[str, Any]):
     # load settings
     use_mlflow = settings['setup']['use_mlflow']
-    mlflow_run_name = settings['setup']['mlflow_run_name']
-    mlflow_uri = settings['setup']['mlflow_uri']
-    mlflow_experiment = settings['setup']['mlflow_experiment']
+    mlflow_run_name = settings['setup'].get('mlflow_run_name', "norun")
+    mlflow_uri = settings['setup'].get('mlflow_uri', "nouri")
+    mlflow_experiment = settings['setup'].get('mlflow_experiment', "noname")
+    show_tqdm = settings['setup'].get('show_tqdm', True)
 
     params = settings['parameters']
 
@@ -220,15 +234,8 @@ def main(settings: dict):
         except RuntimeError:
             pass
     else:
-        # default device: cpu
+        # default device is cpu
         DEVICE = "cpu"
-
-    # print info
-    print(f"Device: {DEVICE}")
-    if use_mlflow:
-        print(f"MLFlow: {mlflow_uri} | {mlflow_experiment} | {mlflow_run_name}")
-    else:
-        print("MLFlow: False")
 
     # initialize environment
     env = gym.vector.SyncVectorEnv([lambda: gym.make(**params['env'])] * params['num_envs'])
@@ -239,8 +246,6 @@ def main(settings: dict):
     ModelClass: type[Learner] = eval(params['model_class'])
 
     if (se := params['start_episode']) > 0:
-        print(f"Loading from epoch {se}")
-
         # torch.load doesn't know that BatchNorm is safe and raises an error by default (to prevent arbitrary code execution)
         with tc.serialization.safe_globals([nn.BatchNorm1d]):
             agent = ModelClass.load(params['save_path'], se, DEVICE)
@@ -256,8 +261,32 @@ def main(settings: dict):
 
     replay_buffer = ReplayBuffer(6, params['replay_buffer_size'])
 
+    # determine train arguments
+    train_args = {
+        'env': env,
+        'agent': agent,
+        'n_episodes': params['n_episodes'],
+        'n_steps_per_episode': params['n_steps_per_episode'],
+        'n_train_epochs': params['n_train_epochs'],
+        'batch_size': params['batch_size'],
+        'replay_buffer': replay_buffer,
+        'lr_fn': lr_fn,
+        'epsilon_fn': epsilon_fn,
+        'gamma_fn': gamma_fn,
+        'custom_reward': custom_reward,
+        'start_episode': params['start_episode'],
+        'save_interval': params['save_interval'],
+        'save_path': params['save_path'],
+        'show_tqdm': show_tqdm,
+    }
+
     # start training
-    if use_mlflow:
+    if use_mlflow == False: # this strange check is necessary because use_mlflow may be an empty dictionary, which should still enable mlflow
+        train_agent(
+            **train_args,
+            use_mlflow = False
+        )
+    else:
         import mlflow
 
         # make sure to have an mlflow server running with "mlflow server --host 127.0.0.1 --port 8080"
@@ -273,44 +302,15 @@ def main(settings: dict):
 
             try:
                 train_agent(
-                    env = env,
-                    agent = agent,
-                    n_episodes = params['n_episodes'],
-                    n_steps_per_episode = params['n_steps_per_episode'],
-                    n_train_epochs = params['n_train_epochs'],
-                    batch_size = params['batch_size'],
-                    replay_buffer = replay_buffer,
-                    lr_fn = lr_fn,
-                    epsilon_fn = epsilon_fn,
-                    gamma_fn = gamma_fn,
-                    custom_reward = custom_reward,
-                    start_episode = params['start_episode'],
-                    save_interval = params['save_interval'],
-                    save_path = params['save_path'],
+                    **train_args,
+                    use_mlflow = True
                 )
             except KeyboardInterrupt:
                 mlflow.set_tag("Note", "Manual interruption")
                 pass
             except AssertionError:
                 mlflow.set_tag("Note", "Interruption by assertion error")
-    else:
-        train_agent(
-            env = env,
-            agent = agent,
-            n_episodes = params['n_episodes'],
-            n_steps_per_episode = params['n_steps_per_episode'],
-            n_train_epochs = params['n_train_epochs'],
-            batch_size = params['batch_size'],
-            replay_buffer = replay_buffer,
-            lr_fn = lr_fn,
-            epsilon_fn = epsilon_fn,
-            gamma_fn = gamma_fn,
-            custom_reward = custom_reward,
-            start_episode = params['start_episode'],
-            save_interval = params['save_interval'],
-            save_path = params['save_path'],
-            use_mlflow = False,
-        )
+
 
 
 if __name__ == "__main__":
@@ -326,9 +326,9 @@ if __name__ == "__main__":
     try:
         settings = toml.load(path_to_settings)
     except FileNotFoundError:
-        print(f"Settings file '{path_to_settings}' was not found")
+        print(f"Settings file '{path_to_settings}' was not found!")
         input("Press enter to exit")
         exit()
 
     # run training
-    main(settings)
+    start_training(settings)
