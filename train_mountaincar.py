@@ -36,9 +36,10 @@ def lr_fn(epoch: int): # TODO: add to settings.toml
     return float(lr)
 
 def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray): # TODO: add to settings.toml?
-    '''reward = y_pos + flag_bonus'''
+    '''reward = ((y_pos + 1) / 2)^2 + flag_bonus'''
     x_pos = state[:, 0] # x-position of cart
-    pos_reward = np.sin(3 * x_pos) # give reward based on achieved height
+    y_pos = np.sin(3 * x_pos) # y-position of cart
+    pos_reward = ((y_pos + 1) / 2)**2 # give reward based on cart position
     flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the position reward
     reward = pos_reward + flag_bonus
 
