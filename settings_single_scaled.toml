@@ -1,8 +1,8 @@
 [setup]
 
-device = ["cuda:2", "cuda"]
+device = ["cuda:3", "cuda"]
 use_mlflow = true
-mlflow_run_name = "Full-Scaled-Quadratic reward"
+mlflow_run_name = "Single-Scaled-Quadratic Reward"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_MountainCar-v0"
@@ -25,7 +25,7 @@ n_train_epochs = 5 # training cycles per epoch
 batch_size = 1013
 
 # model parameters
-model_class = "ScaledRewardLearner"
+model_class = "SingleLearner"
 polyak_coefficient = 0.005
 use_reward_scaling = true
 
@@ -39,4 +39,4 @@ replay_buffer_size = 100_000
 # save parameters
 start_episode = 0
 save_interval = 100
-save_path = "weights/full_scaled"
+save_path = "weights/single_plain"

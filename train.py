@@ -133,7 +133,6 @@ def train_agent(
 
             # convert values to tensors (the detaches are quite probably unnecessary TODO remove?)
             state = state.detach()
-            old_action = action
             action = actions_onehot[action].detach()
             next_state = obs_to_state(observation, agent.device).detach()
             reward = tc.tensor(reward_fn(observation, action, _reward), dtype=tc.float, device=agent.device).detach()
@@ -170,8 +169,8 @@ def train_agent(
             if use_mlflow:
                 mlflow.log_metric("lr", lr, step=i)
                 mlflow.log_metric("gamma", gamma, step=i)
-                mlflow.log_metrics(train_metrics)
-                mlflow.log_metrics(agent.mlflow_get_sample_weights())
+                mlflow.log_metrics(train_metrics, step=i)
+                mlflow.log_metrics(agent.mlflow_get_sample_weights(), step=i)
 
         # log auxiliary metrics
         if use_mlflow:

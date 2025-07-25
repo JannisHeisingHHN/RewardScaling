@@ -1,7 +1,8 @@
 [setup]
+
 device = ["cuda:3", "cuda"]
 use_mlflow = true
-mlflow_run_name = "Single—Plain—First run"
+mlflow_run_name = "Single-Plain-Quadratic reward"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_MountainCar-v0"
