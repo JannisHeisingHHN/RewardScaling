@@ -190,7 +190,7 @@ class ScaledRewardLearner(Learner):
             "weight_q1": float(self.q1.layers[0].weight[0, 0]), # type: ignore
             "weight_q2": float(self.q2.layers[0].weight[0, 0]), # type: ignore
             "weight_q1_target": float(self.q1_target.layers[0].weight[0, 0]), # type: ignore
-            "weight_q1_target": float(self.q2_target.layers[0].weight[0, 0]), # type: ignore
+            "weight_q2_target": float(self.q2_target.layers[0].weight[0, 0]), # type: ignore
         }
 
         return out
