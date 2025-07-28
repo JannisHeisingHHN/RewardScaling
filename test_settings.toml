@@ -18,7 +18,7 @@ num_envs = 11
 architecture_hidden = ["512", "nn.BatchNorm1d(512)", "512"]
 
 # training lengths
-n_episodes = 7000
+n_episodes = 20
 n_steps_per_episode = 197
 n_train_epochs = 5 # training cycles per epoch
 batch_size = 1013

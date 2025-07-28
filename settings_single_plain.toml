@@ -2,7 +2,7 @@
 
 device = ["cuda:3", "cuda"]
 use_mlflow = true
-mlflow_run_name = "Single-Plain-Quadratic reward"
+mlflow_run_name = "Single-Plain-gamma 0.9"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_MountainCar-v0"
@@ -30,7 +30,7 @@ polyak_coefficient = 0.005
 use_reward_scaling = false
 
 # variable parameters
-gamma = {start = 0.99, end = 0.99, midpoint = 2500, rate = 0.0015}
+gamma = {start = 0.9, end = 0.9, midpoint = 2500, rate = 0.0015}
 epsilon = {start = 1, end = 0.05, midpoint = 2000, rate = 0.001}
 
 # replay buffer

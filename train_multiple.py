@@ -24,8 +24,9 @@ def run_experiments(settings_paths: list[str]):
     settings_ready = []
     for i, sp in enumerate(settings_paths):
         try:
-            # I don't quite understand why, but I can't pass the dictionary created by toml.load to a subprocess as it can't access
-            # the nested dictionaries within. Instead, I have to create a deep copy of the dictionary and pass that.
+            # I don't quite understand why, but I can't pass the dictionary created by toml.load to a subprocess as it can't
+            # access the nested dictionaries within. Instead, I have to create a copy of the dictionary where every nested
+            # dictionary is locally created and pass that.
             # Using copy.deepcopy doesn't work.
             settings = clone_dict(toml.load(sp))
         except FileNotFoundError:
@@ -57,7 +58,17 @@ def run_experiments(settings_paths: list[str]):
 
 
 if __name__ == "__main__":
-    # list of settings that are to be executed
-    # settings_paths = ["settings_full_plain.toml", "settings_full_scaled.toml", "settings_single_plain.toml", "settings_single_scaled.toml"]
-    settings_paths = ["test_settings.toml", "test_settings2.toml"]
+    import sys
+
+    # check command syntax
+    if len(sys.argv) == 1:
+        # no settings files given
+        print(f"No settings files provided! Usage: python {sys.argv[0]} <PATH_TO_SETTINGS> [<PATH_TO_SETTINGS> ...]")
+        input("Press enter to exit")
+        exit()
+
+    # get list of settings paths
+    settings_paths = sys.argv[1:]
+
+    # run experiments (I'm so good at naming functions)
     run_experiments(settings_paths)
