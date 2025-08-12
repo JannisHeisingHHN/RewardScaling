@@ -35,15 +35,15 @@ def lr_fn(epoch: int): # TODO: add to settings.toml
 
     return float(lr)
 
-def custom_reward(state: NDArray, action: NDArray | Tensor, reward: NDArray): # TODO: add to settings.toml?
-    '''reward = ((y_pos + 1) / 2)^2 + flag_bonus'''
-    x_pos = state[:, 0] # x-position of cart
-    y_pos = np.sin(3 * x_pos) # y-position of cart
-    pos_reward = ((y_pos + 1) / 2)**2 # give reward based on cart position
-    flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the position reward
-    reward = pos_reward + flag_bonus
+# def custom_reward(state: NDArray, action: NDArray | Tensor, game_reward: NDArray): # TODO: add to settings.toml?
+#     '''reward = ((y_pos + 1) / 2)^2 + flag_bonus'''
+#     x_pos = state[:, 0] # x-position of cart
+#     y_pos = np.sin(3 * x_pos) # y-position of cart
+#     pos_reward = ((y_pos + 1) / 2)**2 # give reward based on cart position
+#     flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the position reward
+#     reward = pos_reward + flag_bonus
 
-    return reward
+#     return reward
 
 
 def obs_to_state(obs, device: Device):
@@ -142,7 +142,7 @@ def train_agent(
                     action = agent.act(state, actions_onehot)
 
             # perform action
-            observation, _reward, _terminated, _truncated, info, *_ = env.step(action)
+            observation, _reward, _terminated, _truncated, *_ = env.step(action)
 
             # convert values to tensors (the detaches are quite probably unnecessary TODO remove?)
             state = state.detach()
@@ -237,6 +237,10 @@ def start_training(settings: dict[str, Any]):
         # default device is cpu
         DEVICE = "cpu"
 
+    # register custom environment if needed
+    if 'registration' in params:
+        gym.register(id = params['env']['id'], **params['registration'])
+
     # initialize environment
     env = gym.vector.SyncVectorEnv([lambda: gym.make(**params['env'])] * params['num_envs'])
     state_size = env.observation_space.shape[-1] # type: ignore
@@ -273,7 +277,7 @@ def start_training(settings: dict[str, Any]):
         'lr_fn': lr_fn,
         'epsilon_fn': epsilon_fn,
         'gamma_fn': gamma_fn,
-        'custom_reward': custom_reward,
+        # 'custom_reward': custom_reward,
         'start_episode': params['start_episode'],
         'save_interval': params['save_interval'],
         'save_path': params['save_path'],
@@ -298,7 +302,7 @@ def start_training(settings: dict[str, Any]):
             mlflow.log_param("lr_fn", lr_fn.__doc__)
             mlflow.log_param("epsilon_fn", epsilon_fn.__doc__)
             mlflow.log_param("gamma_fn", gamma_fn.__doc__)
-            mlflow.log_param("custom_reward", custom_reward.__doc__)
+            # mlflow.log_param("custom_reward", custom_reward.__doc__)
 
             try:
                 train_agent(
