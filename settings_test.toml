@@ -1,8 +1,8 @@
 [setup]
 
 device = ["cuda:1", "cuda"]
-use_mlflow = true
-mlflow_run_name = "Revert"
+use_mlflow = false
+mlflow_run_name = "Dynamic reward type"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_TestEnv"
@@ -11,7 +11,7 @@ mlflow_experiment = "jheis_SRL_TestEnv"
 [parameters] # these are logged in mlflow
 
 # environment
-env = {id = "TestEnv", target = 300, radius = 5}
+env = {id = "TestEnv"}
 registration = {entry_point = "envs.test_env:TestEnv"} # for using custom environments added via "gym.register"
 num_envs = 11
 
@@ -20,7 +20,7 @@ num_envs = 11
 architecture_hidden = ["256", "nn.BatchNorm1d(256)", "256"]
 
 # training lengths
-n_episodes = 500
+n_episodes = 10
 n_steps_per_episode = 500
 n_train_epochs = 5 # training cycles per epoch
 batch_size = 1013

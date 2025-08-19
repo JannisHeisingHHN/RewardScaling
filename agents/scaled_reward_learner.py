@@ -18,9 +18,9 @@ class QFFNN(FFNN):
         return super().forward(X).squeeze()
     
 
-    def get_q(self, state: Tensor, actions: Tensor):
+    def get_q(self, states: Tensor, actions: Tensor):
         '''
-        state has shape (N, D) and actions has shape (M, C), where<br>
+        states has shape (N, D) and actions has shape (M, C), where<br>
         N: number of states (batch size)<br>
         D: number of features in a state<br>
         M: number of actions (must be constant across states)<br>
@@ -28,14 +28,14 @@ class QFFNN(FFNN):
         If `state` is one-dimensional, `N` is assumed to be 1, and likewise for `actions` and `C`
         '''
         # add dimensions if necessary
-        state = tc.atleast_2d(state) # batch dimension
+        states = tc.atleast_2d(states) # batch dimension
         actions = actions.view(len(actions), -1) # action feature dimension
 
-        N = len(state)
+        N = len(states)
         M = len(actions)
 
         # copy states and actions to match with one-another
-        S = state.repeat_interleave(M, 0)
+        S = states.repeat_interleave(M, 0)
         A = actions.repeat(N, 1)
 
         # get Q-values

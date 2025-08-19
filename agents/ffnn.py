@@ -1,6 +1,6 @@
 import torch as tc
 from torch import nn
-from typing import Callable
+from typing import Callable, Self
 
 
 class FFNN(nn.Module):
@@ -43,7 +43,7 @@ class FFNN(nn.Module):
         self.nonlinearity = nonlinearity
 
 
-    def clone(self):
+    def clone(self) -> Self: # the type annotation ensures that the type hint of a child class refers to that class itself instead of FFNN
         '''Creates a deep copy of itself'''
         out = self.__class__(self.architecture, self.nonlinearity) # self.__class__ is used here to make it compatible with child classes
         out.load_state_dict(self.state_dict())

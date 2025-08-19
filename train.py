@@ -201,8 +201,9 @@ def train_agent(
         state = next_state
 
 
-def start_training(settings: dict[str, Any]):
+def start_training(settings: dict[str, Any], use_prints: bool = False):
     # load settings
+    if use_prints: print("Loading settings...", end="")
     use_mlflow = settings['setup']['use_mlflow']
     mlflow_run_name = settings['setup'].get('mlflow_run_name', "norun")
     mlflow_uri = settings['setup'].get('mlflow_uri', "nouri")
@@ -240,8 +241,17 @@ def start_training(settings: dict[str, Any]):
     # register custom environment if needed
     if 'registration' in params:
         gym.register(id = params['env']['id'], **params['registration'])
+    if use_prints: print(f"""
+         Done!
+        Experiment: {mlflow_experiment}
+        Run: {mlflow_run_name}
+        Mlflow: {['off', 'on'][use_mlflow]}
+        Device: {DEVICE}
+    """)
 
-    # initialize environment
+
+    # initialise environment
+    if use_prints: print("Initialising environment and model...", end="")
     env = gym.vector.SyncVectorEnv([lambda: gym.make(**params['env'])] * params['num_envs'])
     state_size = env.observation_space.shape[-1] # type: ignore
     n_actions = int(env.action_space.nvec[0]) # type: ignore
@@ -264,6 +274,7 @@ def start_training(settings: dict[str, Any]):
         )
 
     replay_buffer = ReplayBuffer(6, params['replay_buffer_size'])
+    if use_prints: print(" Done! Training...")
 
     # determine train arguments
     train_args = {
@@ -314,6 +325,8 @@ def start_training(settings: dict[str, Any]):
                 pass
             except AssertionError:
                 mlflow.set_tag("Note", "Interruption by assertion error")
+    
+    if use_prints: print(" Done!")
 
 
 
@@ -321,18 +334,14 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) != 2:
         # settings file was not provided
-        print(f"Must supply a path to a settings.toml file! Usage: python {sys.argv[0]} <PATH_TO_SETTINGS>")
-        input("Press enter to exit")
-        exit()
+        raise TypeError(f"Must supply a path to a settings.toml file! Usage: python {sys.argv[0]} <PATH_TO_SETTINGS>")
 
     # try to load settings
     path_to_settings = sys.argv[1]
     try:
         settings = toml.load(path_to_settings)
     except FileNotFoundError:
-        print(f"Settings file '{path_to_settings}' was not found!")
-        input("Press enter to exit")
-        exit()
+        raise ValueError(f"Settings file '{path_to_settings}' was not found!")
 
     # run training
-    start_training(settings)
+    start_training(settings, use_prints=True)
