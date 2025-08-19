@@ -204,6 +204,7 @@ def train_agent(
 def start_training(settings: dict[str, Any], use_prints: bool = False):
     # load settings
     if use_prints: print("Loading settings...", end="")
+
     use_mlflow = settings['setup']['use_mlflow']
     mlflow_run_name = settings['setup'].get('mlflow_run_name', "norun")
     mlflow_uri = settings['setup'].get('mlflow_uri', "nouri")
@@ -241,17 +242,18 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     # register custom environment if needed
     if 'registration' in params:
         gym.register(id = params['env']['id'], **params['registration'])
-    if use_prints: print(f"""
-         Done!
-        Experiment: {mlflow_experiment}
-        Run: {mlflow_run_name}
-        Mlflow: {['off', 'on'][use_mlflow]}
-        Device: {DEVICE}
-    """)
+
+    print("Done!")
+    if use_prints:
+        print(f"\tExperiment: {mlflow_experiment}")
+        print(f"\tRun: {mlflow_run_name}")
+        print(f"\tMlflow: {['off', 'on'][use_mlflow]}")
+        print(f"\tDevice: {DEVICE}")
 
 
     # initialise environment
     if use_prints: print("Initialising environment and model...", end="")
+
     env = gym.vector.SyncVectorEnv([lambda: gym.make(**params['env'])] * params['num_envs'])
     state_size = env.observation_space.shape[-1] # type: ignore
     n_actions = int(env.action_space.nvec[0]) # type: ignore
@@ -274,7 +276,8 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         )
 
     replay_buffer = ReplayBuffer(6, params['replay_buffer_size'])
-    if use_prints: print(" Done! Training...")
+
+    if use_prints: print(" Done!\nTraining...")
 
     # determine train arguments
     train_args = {
