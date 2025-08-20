@@ -2,7 +2,7 @@
 
 device = ["cuda:2", "cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Pendulum-Single-Scaled-Changed params"
+mlflow_run_name = "Pendulum-Single-Scaled-Faster gamma"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_Pendulum"
@@ -20,7 +20,7 @@ num_envs = 11
 architecture_hidden = ["100", "100"]
 
 # training lengths
-n_episodes = 500
+n_episodes = 200
 n_steps_per_episode = 300
 n_train_epochs = 32 # training cycles per epoch
 batch_size = 128
@@ -32,8 +32,8 @@ target_update = 0.85
 use_reward_scaling = true
 
 # variable parameters
-gamma = {start = 0.0, end = 0.95, midpoint = 150, rate = 0.02}  # discount factor
-epsilon = {start = 1, end = 0.05, midpoint = 100, rate = 0.02}  # chance for random action
+gamma = {start = 0.0, end = 0.95, midpoint = 30, rate = 0.1}    # discount factor
+epsilon = {start = 1, end = 0.05, midpoint = 30, rate = 0.1}    # chance for random action
 learning_rate = {start = 3e-4, factor = 0.9997}                 # learning rate (exponential decay)
 
 # replay buffer
