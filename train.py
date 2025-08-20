@@ -5,6 +5,7 @@ from torch import nn
 import gymnasium as gym
 
 from agents import *
+from envs import *
 
 from typing import Callable, Any
 from torch.types import Device
@@ -14,6 +15,10 @@ from numpy.typing import NDArray
 from pathlib import Path
 import toml
 
+from tqdm import trange
+import mlflow
+
+
 #
 # FILE USAGE: python train_mountaincar.py <PATH_TO_SETTINGS>
 #
@@ -22,18 +27,27 @@ import toml
 # Set variable parameters. The docstrings are used as the parameter value for mlflow
 def get_logistic_fn(start: float, end: float, midpoint: float, rate: float) -> Callable[[float], float]:
     '''
-    Create a logistic function of the form `f(x) = start + (end - start) / (1 + exp(-rate*(x - midpoint)))`<br>.
+    Create a logistic function of the form `f(x) = start + (end - start) / (1 + exp(-rate*(x - midpoint)))`.
     This function satisfies `f(-∞) = start`, `f(∞) = end`. If `midpoint` is reasonably large, then `f(0) ≈ start`.
     '''
     out = lambda x: start + (end - start) / (1 + np.exp(-rate*(x - midpoint)))
     out.__doc__ = f"logistic_fn({start=}, {end=}, {midpoint=}, {rate=})"
     return out
 
-def lr_fn(epoch: int): # TODO: add to settings.toml
-    '''lr = 3e-4 * (1 - 3e-4)**epoch'''
-    lr = 3e-4 * (1 - 3e-4)**epoch
 
-    return float(lr)
+def get_exponential_fn(start: float, factor: float) -> Callable[[float], float]:
+    '''
+    Create an exponential function of the form `f(x) = start * factor^x`.
+    '''
+    out = lambda x: start * (factor**x)
+    out.__doc__ = f"exponential_fn({start=}, {factor=})"
+    return out
+
+# def lr_fn(epoch: int): # TODO: add to settings.toml
+#     '''lr = 3e-4 * (1 - 3e-4)**epoch'''
+#     lr = 3e-4 * (1 - 3e-4)**epoch
+
+#     return float(lr)
 
 # def custom_reward(state: NDArray, action: NDArray | Tensor, game_reward: NDArray): # TODO: add to settings.toml?
 #     '''reward = ((y_pos + 1) / 2)^2 + flag_bonus'''
@@ -63,6 +77,7 @@ def train_agent(
     lr_fn: Callable[[int], float],
     epsilon_fn: Callable[[int], float],
     gamma_fn: Callable[[int], float],
+    target_update: float | int,
     custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None = None,
     start_episode: int = 0,
     save_interval: int | None = None,
@@ -73,6 +88,7 @@ def train_agent(
     '''
     Training algorithm for a Q-learning agent in a gym environment with a discrete action space
 
+    * target_update: If float, uses polyak averaging. If int, uses copy with the given periodicity.
     * custom_reward: Maps `(observation, action, game_reward)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
     * show_tqdm: Whether to use the tqm progress bar. May also be a dictionary of arguments, which are then passed to `trange`.
     '''
@@ -93,10 +109,6 @@ def train_agent(
     if start_episode == 0 and save_path is not None:
         agent.save(save_path, 0)
 
-    # import optional libraries
-    if show_tqdm: from tqdm import trange
-    if use_mlflow: import mlflow
-
     # initialize replay buffer
     if isinstance(replay_buffer, int):
         replay_buffer = ReplayBuffer(6, maxlen=replay_buffer)
@@ -105,7 +117,10 @@ def train_agent(
 
     # create action lookup
     n_actions = int(env.action_space.nvec[0]) # type: ignore
-    actions_onehot = tc.eye(n_actions, dtype=tc.int, device=agent.device)
+    actions_onehot = tc.eye(n_actions, device=agent.device)
+
+    # select target update policy
+    use_target_copy = isinstance(target_update, int)
 
     # select iterator
     start = start_episode
@@ -164,6 +179,9 @@ def train_agent(
             if terminated.any() or truncated.any(): # TODO: make this work with parallelization and variable episode length
                 break
 
+            # update state
+            state = next_state
+
         # train agent
         if len(replay_buffer) >= batch_size:
             lr = lr_fn(i)
@@ -177,6 +195,13 @@ def train_agent(
                 lr = lr,
                 gamma = gamma,
             )
+
+            # update target network
+            if use_target_copy: # hard update
+                if i % target_update == 0:
+                    agent.target_update_copy()
+            else: # soft update
+                agent.target_update_polyak(target_update)
 
             # log training metrics
             if use_mlflow:
@@ -197,9 +222,6 @@ def train_agent(
         if save_interval is not None and ((i+1) % save_interval == 0 or i+1 == n_episodes + start_episode):
             agent.save(save_path, i+1) # type: ignore (it is guaranteed that save_path is not None)
 
-        # update state
-        state = next_state
-
 
 def start_training(settings: dict[str, Any], use_prints: bool = False):
     # load settings
@@ -212,10 +234,12 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     show_tqdm = settings['setup'].get('show_tqdm', True)
 
     params = settings['parameters']
+    discretise: int | bool = params.get('discretise', False)
 
     # define variable parameters
     gamma_fn = get_logistic_fn(**params['gamma'])
     epsilon_fn = get_logistic_fn(**params['epsilon'])
+    lr_fn = get_exponential_fn(**params['learning_rate'])
 
     # the model architecture needs to be evaluated
     architecture_hidden = [eval(layer) for layer in params['architecture_hidden']]
@@ -254,7 +278,13 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     # initialise environment
     if use_prints: print("Initialising environment and model...", end="")
 
-    env = gym.vector.SyncVectorEnv([lambda: gym.make(**params['env'])] * params['num_envs'])
+    env_generator = (
+            (lambda: DiscretiseAction(gym.make(**params['env']), n_actions=discretise))
+        if isinstance(discretise, int) else
+            (lambda: gym.make(**params['env']))
+    )
+
+    env = gym.vector.SyncVectorEnv([env_generator] * params['num_envs'])
     state_size = env.observation_space.shape[-1] # type: ignore
     n_actions = int(env.action_space.nvec[0]) # type: ignore
 
@@ -266,11 +296,9 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         with tc.serialization.safe_globals([nn.BatchNorm1d]):
             agent = ModelClass.load(params['save_path'], se, DEVICE)
     else:
-
         agent = ModelClass(
             architecture = [state_size + n_actions] + architecture_hidden + [1],
             n_actions = n_actions,
-            polyak = params['polyak_coefficient'],
             use_reward_scaling=params['use_reward_scaling'],
             device = DEVICE,
         )
@@ -291,6 +319,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         'lr_fn': lr_fn,
         'epsilon_fn': epsilon_fn,
         'gamma_fn': gamma_fn,
+        'target_update': params['target_update'],
         # 'custom_reward': custom_reward,
         'start_episode': params['start_episode'],
         'save_interval': params['save_interval'],

@@ -1,7 +1,8 @@
 from collections import deque
 import numpy as np
 
-
+# TODO right now the replay buffer returns lists that need to be stacked to tensors. This is highly inefficient.
+# Change buffer to store tensors (or arrays) for massive speed boost
 class ReplayBuffer:
     '''Simple replay buffer designed for the application in reinforcement learning'''
     def __init__(self, n_fields: int, maxlen: int | None = None):

@@ -32,6 +32,16 @@ class Learner(nn.Module, ABC):
     def mlflow_get_sample_weights(self) -> dict[str, float]:
         '''Return any sample weights for logging, preferably one from each separate model part'''
 
+    @property
+    @abstractmethod
+    def active_submodels(self) -> list[nn.Module]:
+        '''Return a list of contained models that have a corresponding target model. Used for target updating.'''
+
+    @property
+    @abstractmethod
+    def target_submodels(self) -> list[nn.Module]:
+        '''Return a list of target models in the same order as `active_submodels`. Used for target updating.'''
+
     @abstractmethod
     def training_session(
         self,
@@ -87,3 +97,19 @@ class Learner(nn.Module, ABC):
         out = cls.from_dict(model_dict, device)
 
         return out
+
+
+    def target_update_polyak(self, rho: float) -> None:
+        for q, q_target in zip(self.active_submodels, self.target_submodels):
+            v = tc.nn.utils.parameters_to_vector(q.parameters())
+            v_target = tc.nn.utils.parameters_to_vector(q_target.parameters())
+
+            v_new = rho * v_target + (1 - rho) * v
+
+            tc.nn.utils.vector_to_parameters(v_new, q_target.parameters())
+
+
+    def target_update_copy(self) -> None:
+        for q, q_target in zip(self.active_submodels, self.target_submodels):
+            v = tc.nn.utils.parameters_to_vector(q.parameters())
+            tc.nn.utils.vector_to_parameters(v, q_target.parameters())

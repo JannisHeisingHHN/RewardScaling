@@ -79,7 +79,6 @@ class SingleLearner(Learner):
         self,
         architecture: list[int | nn.Module],
         n_actions: int,
-        polyak: float,
         use_reward_scaling: bool,
         device: Device,
         *args,
@@ -89,15 +88,14 @@ class SingleLearner(Learner):
 
         self.q1 = QFFNN(architecture)
 
-        self.optim_q1 = tc.optim.Adam(self.q1.parameters())
-        self.mse_loss: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
+        self.optim_q1 = tc.optim.Adam(self.q1.parameters(), eps=0.000001)
+        # self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
+        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.SmoothL1Loss()
 
         self.q1_target = self.q1.clone()
 
         self.n_actions = n_actions
-        self.actions_onehot = tc.eye(n_actions, dtype=tc.int)
-
-        self.rho = polyak
+        self.actions_onehot = tc.eye(n_actions)
 
         # The following if-else morally belongs in training_session (where self.bellman_fn is used) as its purpose is to determine
         # how to calculate the Q-functions' targets, but because I'm obsessed with runtime optimization I moved it here
@@ -127,7 +125,6 @@ class SingleLearner(Learner):
 
             'q1_target': self.q1_target.state_dict(),
 
-            'rho': self.rho,
             'use_reward_scaling': self.use_reward_scaling,
         }
 
@@ -140,7 +137,6 @@ class SingleLearner(Learner):
         out = cls(
             architecture = model_dict['architecture'],
             n_actions = model_dict['n_actions'],
-            polyak = model_dict['rho'],
             use_reward_scaling = model_dict['use_reward_scaling'],
             device = device,
         )
@@ -163,15 +159,20 @@ class SingleLearner(Learner):
         return i_action
 
 
-    def target_update_polyak(self):
-        for q, q_target in zip([self.q1], [self.q1_target]):
-            s = q.state_dict()
-            s_target = q_target.state_dict()
-            s_new = {}
-            for k in s_target.keys():
-                s_new[k] = (1 - self.rho) * s_target[k] + self.rho * s[k]
+    # def target_update_polyak(self, rho):
+    #     for q, q_target in zip([self.q1], [self.q1_target]):
+    #         v = tc.nn.utils.parameters_to_vector(q.parameters())
+    #         v_target = tc.nn.utils.parameters_to_vector(q_target.parameters())
 
-            q_target.load_state_dict(s_new)
+    #         v_new = rho * v_target + (1 - rho) * v
+
+    #         tc.nn.utils.vector_to_parameters(v_new, q_target.parameters())
+
+
+    # def target_update_copy(self):
+    #     for q, q_target in zip([self.q1], [self.q1_target]):
+    #         v = tc.nn.utils.parameters_to_vector(q.parameters())
+    #         tc.nn.utils.vector_to_parameters(v, q_target.parameters())
 
 
     def mlflow_get_sample_weights(self) -> dict[str, float]:
@@ -181,6 +182,16 @@ class SingleLearner(Learner):
         }
 
         return out
+
+
+    @property
+    def active_submodels(self) -> list[nn.Module]:
+        return [self.q1]
+
+
+    @property
+    def target_submodels(self) -> list[nn.Module]:
+        return [self.q1_target]
 
 
     def training_session(
@@ -203,21 +214,20 @@ class SingleLearner(Learner):
 
             # compute target q-value for q-networks
             with tc.no_grad():
-                # gauge q-values
-                q_target = self.q1_target.get_max_q(next_state[~terminated], self.actions_onehot)
+                # # gauge q-values
+                # q_target = self.q1_target.get_max_q(next_state[~terminated], self.actions_onehot)
 
-                # compute bellman function
-                y = self.bellman_fn(reward, q_target, gamma, terminated)
+                # # compute bellman function # TODO revert
+                # y = self.bellman_fn(reward, q_target, gamma, terminated)
+                q_target = self.q1_target.get_max_q(next_state, self.actions_onehot)
+                y = reward + gamma * q_target
 
             # perform gradient step for q1-network
             q1 = self.q1(state, action)
-            loss_q1 = self.mse_loss(y.detach(), q1)
+            loss_q1 = self.loss_fn(y.detach(), q1)
             self.optim_q1.zero_grad()
             loss_q1.backward()
             self.optim_q1.step()
-
-            # update target networks
-            self.target_update_polyak()
 
             # track losses
             mean_loss_q1 += float(loss_q1)
