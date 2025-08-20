@@ -24,7 +24,6 @@ import mlflow
 #
 
 
-# Set variable parameters. The docstrings are used as the parameter value for mlflow
 def get_logistic_fn(start: float, end: float, midpoint: float, rate: float) -> Callable[[float], float]:
     '''
     Create a logistic function of the form `f(x) = start + (end - start) / (1 + exp(-rate*(x - midpoint)))`.
@@ -42,16 +41,6 @@ def get_exponential_fn(start: float, factor: float) -> Callable[[float], float]:
     out = lambda x: start * (factor**x)
     out.__doc__ = f"exponential_fn({start=}, {factor=})"
     return out
-
-def custom_reward(state: NDArray, action: NDArray | Tensor, game_reward: NDArray): # TODO: add to settings.toml?
-    '''reward = ((y_pos + 1) / 2)^2 + flag_bonus'''
-    x_pos = state[:, 0] # x-position of cart
-    y_pos = np.sin(3 * x_pos) # y-position of cart
-    pos_reward = ((y_pos + 1) / 2)**2 # give reward based on cart position
-    flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the position reward
-    reward = pos_reward + flag_bonus
-
-    return reward
 
 
 def obs_to_state(obs, device: Device):
@@ -148,7 +137,7 @@ def train_agent(
             else:
                 # greedy action
                 with tc.no_grad():
-                    action = agent.act(state, actions_onehot)
+                    action = agent.act(state)
 
             # perform action
             observation, _reward, _terminated, _truncated, *_ = env.step(action)
@@ -227,7 +216,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     mlflow_experiment = settings['setup'].get('mlflow_experiment', "noname")
     show_tqdm = settings['setup'].get('show_tqdm', True)
 
-    params = settings['parameters']
+    params: dict[str, Any] = settings['parameters']
     discretise: int = params.get('discretise', 0)
 
     # define variable parameters
@@ -237,6 +226,28 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
 
     # the model architecture needs to be evaluated
     architecture_hidden = [eval(layer) for layer in params['architecture_hidden']]
+
+    # handle custom reward
+    custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None
+    custom_reward_doc: str
+
+    if 'custom_reward' not in params:
+        # define no custom reward
+        custom_reward = None
+        custom_reward_doc = ""
+    else:
+        # custom reward function can be given as a string in the settings file
+        str_cr: str = params['custom_reward']
+
+        # execute code
+        _locals = {}
+        exec(str_cr, _locals)
+
+        # extract custom_reward function
+        custom_reward = _locals['custom_reward']
+
+        # get custom_reward documentation (if given)
+        custom_reward_doc = params.get('custom_reward_doc', str_cr)
 
     # determine device
     devices: str | list[str] = settings['setup']['device']
@@ -328,18 +339,12 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
             use_mlflow = False
         )
     else:
-        import mlflow
-
         # make sure to have an mlflow server running with "mlflow server --host 127.0.0.1 --port 8080"
         mlflow.set_tracking_uri(mlflow_uri)
         mlflow.set_experiment(mlflow_experiment)
 
         with mlflow.start_run(run_name=mlflow_run_name):
             mlflow.log_params(params)
-            mlflow.log_param("lr_fn", lr_fn.__doc__)
-            mlflow.log_param("epsilon_fn", epsilon_fn.__doc__)
-            mlflow.log_param("gamma_fn", gamma_fn.__doc__)
-            mlflow.log_param("custom_reward", custom_reward.__doc__)
 
             try:
                 train_agent(

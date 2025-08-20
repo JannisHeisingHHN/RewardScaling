@@ -16,7 +16,7 @@ class Learner(nn.Module, ABC):
     '''Interface for all my different agent versions'''
 
     @abstractmethod
-    def act(self, state: Tensor, actions: Tensor) -> NDArray:
+    def act(self, state: Tensor) -> NDArray:
         '''Choose an action from `actions` based on the state. `state` may be singular or batched'''
 
     @abstractmethod

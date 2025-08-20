@@ -29,6 +29,20 @@ model_class = "ScaledRewardLearner"
 target_update = 0.9
 use_reward_scaling = true
 
+# Custom reward as python code; must include a function "custom_reward(observation, action, game_reward) -> NDArray"
+# Is passed through exec(). Due to toml weirdness a docstring is not (easily) possible; put an explanation in the "custom_reward_doc" field below
+custom_reward = """
+def custom_reward(observation, action, game_reward):
+    x_pos = observation[:, 0]           # x-position of cart
+    y_pos = np.sin(3 * x_pos)           # y-position of cart
+    pos_reward = ((y_pos + 1) / 2)**2   # give reward based on cart position
+    flag_bonus = 2 * (x_pos >= 0.5)     # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the position reward
+    reward = pos_reward + flag_bonus
+
+    return reward
+"""
+custom_reward_doc = "reward = ((y_pos + 1) / 2)^2 + flag_bonus"
+
 # variable parameters
 gamma = {start = 0, end = 0.9, midpoint = 1500, rate = 0.002}       # discount factor
 epsilon = {start = 1, end = 0.05, midpoint = 2000, rate = 0.001}    # chance for random action
