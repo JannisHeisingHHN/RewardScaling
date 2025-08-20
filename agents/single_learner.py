@@ -43,7 +43,8 @@ class SingleLearner(Learner):
         self.q1 = QFFNN(architecture)
 
         self.optim_q1 = tc.optim.Adam(self.q1.parameters(), eps=0.000001)
-        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
+        # self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
+        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.SmoothL1Loss() # TODO test if this works better
 
         self.q1_target = self.q1.clone()
 

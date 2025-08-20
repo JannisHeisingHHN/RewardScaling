@@ -45,8 +45,8 @@ class ScaledRewardLearner(Learner):
 
         self.optim_q1 = tc.optim.Adam(self.q1.parameters())
         self.optim_q2 = tc.optim.Adam(self.q2.parameters())
-        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
-        # self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.SmoothL1Loss() # TODO test if this works better
+        # self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
+        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.SmoothL1Loss() # TODO test if this works better
 
         self.q1_target = self.q1.clone()
         self.q2_target = self.q2.clone()

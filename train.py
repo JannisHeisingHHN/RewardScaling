@@ -155,7 +155,7 @@ def train_agent(
 
             # convert values to tensors (the detaches are quite probably unnecessary TODO remove?)
             state = state.detach()
-            action = actions_onehot[action].detach()
+            action = actions_onehot[tc.from_numpy(action)].detach()
             next_state = obs_to_state(observation, agent.device).detach()
             reward = tc.tensor(reward_fn(observation, action, _reward), dtype=tc.float, device=agent.device).detach()
             terminated = tc.tensor(_terminated, dtype=tc.bool, device=agent.device).detach()
@@ -207,10 +207,10 @@ def train_agent(
         # log auxiliary metrics
         if use_mlflow:
             mlflow.log_metric("total_reward", total_reward, step=i)
-            mlflow.log_metric("episode_length", t+1, step=i)
-            mlflow.log_metric("mean_reward", total_reward / (t+1), step=i)
+            mlflow.log_metric("episode_length", t+1, step=i) # type: ignore (t is always bound)
+            mlflow.log_metric("mean_reward", total_reward / (t+1), step=i) # type: ignore (t is always bound)
             mlflow.log_metric("buffer_size", len(replay_buffer), step=i)
-            mlflow.log_metric("epsilon", epsilon, step=i)
+            mlflow.log_metric("epsilon", epsilon, step=i) # type: ignore (epsilon is always bound)
 
         # save model at regular intervals and at the very end
         if save_interval is not None and ((i+1) % save_interval == 0 or i+1 == n_episodes + start_episode):

@@ -2,7 +2,7 @@
 
 device = ["cuda:2", "cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Full-Scaled-Fixed state"
+mlflow_run_name = "Full-Scaled-SmoothL1Loss"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_MountainCar-v0"
