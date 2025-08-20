@@ -1,8 +1,8 @@
 [setup]
 
-device = ["cuda:1", "cuda:0"]
+device = ["cuda:3", "cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Pendulum-Single-Revert bellman"
+mlflow_run_name = "Pendulum-Full-Plain-Changed params"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_Pendulum"
@@ -12,7 +12,7 @@ mlflow_experiment = "jheis_SRL_Pendulum"
 
 # environment
 env = {id = "Pendulum-v1", max_episode_steps = 500}
-discretise = 5 # target number of actions. Comment out if action space is already discrete
+discretise = 7 # target number of actions. Comment out if action space is already discrete
 num_envs = 11
 
 # model architecture (excluding input & output size since these are determined by the environment)
@@ -20,21 +20,21 @@ num_envs = 11
 architecture_hidden = ["100", "100"]
 
 # training lengths
-n_episodes = 600
-n_steps_per_episode = 500
+n_episodes = 500
+n_steps_per_episode = 300
 n_train_epochs = 32 # training cycles per epoch
 batch_size = 128
 
 # model parameters
-model_class = "SingleLearner"
-target_update = 0.85 # TODO change this line in the other settings files and swap low rho for large rho
+model_class = "ScaledRewardLearner"
+target_update = 0.85
 # target_update = 20
 use_reward_scaling = false
 
 # variable parameters
-gamma = {start = 0.95, end = 0.95, midpoint = 2500, rate = 0.0015}  # discount factor
-epsilon = {start = 0.2, end = 0.2, midpoint = 2000, rate = 0.001}   # chance for random action
-learning_rate = {start = 2e-4, factor = 1}                          # learning rate (exponential decay)
+gamma = {start = 0.95, end = 0.95, midpoint = 150, rate = 0.02} # discount factor
+epsilon = {start = 1, end = 0.05, midpoint = 100, rate = 0.02}  # chance for random action
+learning_rate = {start = 3e-4, factor = 0.9997}                 # learning rate (exponential decay)
 
 # replay buffer
 replay_buffer_size = 100_000
@@ -42,4 +42,4 @@ replay_buffer_size = 100_000
 # save parameters
 start_episode = 0
 save_interval = 10
-save_path = "weights/pendulum_full_plain"
+save_path = "weights/pendulum/full_plain"

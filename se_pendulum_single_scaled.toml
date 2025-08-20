@@ -1,0 +1,45 @@
+[setup]
+
+device = ["cuda:2", "cuda:0"]
+use_mlflow = true
+mlflow_run_name = "Pendulum-Single-Scaled-Changed params"
+
+mlflow_uri = "http://10.30.20.11:5000"
+mlflow_experiment = "jheis_SRL_Pendulum"
+
+
+[parameters] # these are logged in mlflow
+
+# environment
+env = {id = "Pendulum-v1", max_episode_steps = 500}
+discretise = 7 # target number of actions. Comment out if action space is already discrete
+num_envs = 11
+
+# model architecture (excluding input & output size since these are determined by the environment)
+# because TOML doesn't support heterogeneous arrays, all entries must be strings, which are passed through eval()
+architecture_hidden = ["100", "100"]
+
+# training lengths
+n_episodes = 500
+n_steps_per_episode = 300
+n_train_epochs = 32 # training cycles per epoch
+batch_size = 128
+
+# model parameters
+model_class = "SingleLearner"
+target_update = 0.85
+# target_update = 20
+use_reward_scaling = true
+
+# variable parameters
+gamma = {start = 0.0, end = 0.95, midpoint = 150, rate = 0.02}  # discount factor
+epsilon = {start = 1, end = 0.05, midpoint = 100, rate = 0.02}  # chance for random action
+learning_rate = {start = 3e-4, factor = 0.9997}                 # learning rate (exponential decay)
+
+# replay buffer
+replay_buffer_size = 100_000
+
+# save parameters
+start_episode = 0
+save_interval = 10
+save_path = "weights/pendulum/single_scaled"
