@@ -229,25 +229,20 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
 
     # handle custom reward
     custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None
-    custom_reward_doc: str
 
     if 'custom_reward' not in params:
         # define no custom reward
         custom_reward = None
-        custom_reward_doc = ""
     else:
         # custom reward function can be given as a string in the settings file
         str_cr: str = params['custom_reward']
 
         # execute code
         _locals = {}
-        exec(str_cr, _locals)
+        exec(str_cr, globals(), _locals)
 
         # extract custom_reward function
         custom_reward = _locals['custom_reward']
-
-        # get custom_reward documentation (if given)
-        custom_reward_doc = params.get('custom_reward_doc', str_cr)
 
     # determine device
     devices: str | list[str] = settings['setup']['device']

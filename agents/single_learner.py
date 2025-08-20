@@ -101,9 +101,9 @@ class SingleLearner(Learner):
         return out
 
 
-    def act(self, state: Tensor, actions: Tensor) -> NDArray:
+    def act(self, state: Tensor) -> NDArray:
         # choose action
-        q = self.q1.get_q(state, actions)
+        q = self.q1.get_q(state, self.actions_onehot)
 
         i_action = q.argmax(-1).cpu().numpy()
 
