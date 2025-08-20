@@ -1,7 +1,7 @@
 import torch as tc
 from torch import nn
 
-from .ffnn import FFNN
+from .qffnn import QFFNN
 from .learner import Learner
 from .replay_buffer import ReplayBuffer
 
@@ -9,52 +9,6 @@ from typing import Callable
 from numpy.typing import NDArray
 from torch.types import Device
 from torch import Tensor
-
-
-class QFFNN(FFNN):
-    '''Copy of FFNN whose forward function accepts two inputs instead of one and whose output is squeezed (nicer interface for Q-learning)'''
-    def forward(self, state: Tensor, action: Tensor):
-        X = tc.concat([state, action], dim=-1)
-        return super().forward(X).squeeze()
-    
-
-    def get_q(self, state: Tensor, actions: Tensor):
-        '''
-        state has shape (N, D) and actions has shape (M, C), where<br>
-        N: number of states (batch size)<br>
-        D: number of features in a state<br>
-        M: number of actions (must be constant across states)<br>
-        C: number of features in an action<br>
-        If `state` is one-dimensional, `N` is assumed to be 1, and likewise for `actions` and `C`
-        '''
-        # add dimensions if necessary
-        state = tc.atleast_2d(state) # batch dimension
-        actions = actions.view(len(actions), -1) # action feature dimension
-
-        N = len(state)
-        M = len(actions)
-
-        # copy states and actions to match with one-another
-        S = state.repeat_interleave(M, 0)
-        A = actions.repeat(N, 1)
-
-        # get Q-values
-        Q: Tensor = self(S, A)
-
-        # reshape to (N, C)
-        Q = Q.view(N, -1)
-
-        return Q
-
-
-    def get_max_q(self, state: Tensor, actions: Tensor):
-        # get Q-values
-        Q = self.get_q(state, actions)
-
-        # get maximal Q-value per state
-        MQ = Q.max(1)[0].squeeze()
-
-        return MQ
 
 
 def _bellmann_std(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
@@ -89,8 +43,7 @@ class SingleLearner(Learner):
         self.q1 = QFFNN(architecture)
 
         self.optim_q1 = tc.optim.Adam(self.q1.parameters(), eps=0.000001)
-        # self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
-        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.SmoothL1Loss()
+        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
 
         self.q1_target = self.q1.clone()
 
@@ -106,11 +59,8 @@ class SingleLearner(Learner):
 
 
     def set_device(self, device: Device):
-        self.to(device)
         self.actions_onehot = self.actions_onehot.to(device)
-        self.device = device
-
-        return self
+        return super().set_device(device)
 
 
     def to_dict(self):
@@ -159,22 +109,6 @@ class SingleLearner(Learner):
         return i_action
 
 
-    # def target_update_polyak(self, rho):
-    #     for q, q_target in zip([self.q1], [self.q1_target]):
-    #         v = tc.nn.utils.parameters_to_vector(q.parameters())
-    #         v_target = tc.nn.utils.parameters_to_vector(q_target.parameters())
-
-    #         v_new = rho * v_target + (1 - rho) * v
-
-    #         tc.nn.utils.vector_to_parameters(v_new, q_target.parameters())
-
-
-    # def target_update_copy(self):
-    #     for q, q_target in zip([self.q1], [self.q1_target]):
-    #         v = tc.nn.utils.parameters_to_vector(q.parameters())
-    #         tc.nn.utils.vector_to_parameters(v, q_target.parameters())
-
-
     def mlflow_get_sample_weights(self) -> dict[str, float]:
         out = {
             "weight_q1": float(self.q1.layers[0].weight[0, 0]), # type: ignore
@@ -214,13 +148,11 @@ class SingleLearner(Learner):
 
             # compute target q-value for q-networks
             with tc.no_grad():
-                # # gauge q-values
-                # q_target = self.q1_target.get_max_q(next_state[~terminated], self.actions_onehot)
+                # gauge q-values
+                q_target = self.q1_target.get_max_q(next_state[~terminated], self.actions_onehot)
 
-                # # compute bellman function # TODO revert
-                # y = self.bellman_fn(reward, q_target, gamma, terminated)
-                q_target = self.q1_target.get_max_q(next_state, self.actions_onehot)
-                y = reward + gamma * q_target
+                # compute bellman function
+                y = self.bellman_fn(reward, q_target, gamma, terminated)
 
             # perform gradient step for q1-network
             q1 = self.q1(state, action)

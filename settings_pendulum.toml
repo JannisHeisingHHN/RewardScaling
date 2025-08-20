@@ -2,7 +2,7 @@
 
 device = ["cuda:1", "cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Pendulum-Single-Rho=0.85"
+mlflow_run_name = "Pendulum-Single-Revert bellman"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_Pendulum"
@@ -12,7 +12,7 @@ mlflow_experiment = "jheis_SRL_Pendulum"
 
 # environment
 env = {id = "Pendulum-v1", max_episode_steps = 500}
-discretise = 5 # target number of actions. Uncomment if action space is already discrete
+discretise = 5 # target number of actions. Comment out if action space is already discrete
 num_envs = 11
 
 # model architecture (excluding input & output size since these are determined by the environment)

@@ -1,8 +1,8 @@
 [setup]
 
-device = ["cuda:1", "cuda"]
+device = ["cuda:1", "cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Full-Plain-gamma 0.9"
+mlflow_run_name = "Full-Plain-Fixed state"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_MountainCar-v0"
@@ -26,12 +26,13 @@ batch_size = 1013
 
 # model parameters
 model_class = "ScaledRewardLearner"
-polyak_coefficient = 0.005
+target_update = 0.9
 use_reward_scaling = false
 
 # variable parameters
-gamma = {start = 0.9, end = 0.9, midpoint = 2500, rate = 0.0015}
-epsilon = {start = 1, end = 0.05, midpoint = 2000, rate = 0.001}
+gamma = {start = 0.9, end = 0.9, midpoint = 2500, rate = 0.0015}    # discount factor
+epsilon = {start = 1, end = 0.05, midpoint = 2000, rate = 0.001}    # chance for random action
+learning_rate = {start = 3e-4, factor = 0.9997}                     # learning rate (exponential decay)
 
 # replay buffer
 replay_buffer_size = 100_000

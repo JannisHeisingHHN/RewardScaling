@@ -63,9 +63,7 @@ if __name__ == "__main__":
     # check command syntax
     if len(sys.argv) == 1:
         # no settings files given
-        print(f"No settings files provided! Usage: python {sys.argv[0]} <PATH_TO_SETTINGS> [<PATH_TO_SETTINGS> ...]")
-        input("Press enter to exit")
-        exit()
+        raise TypeError(f"No settings files provided! Usage: python {sys.argv[0]} <PATH_TO_SETTINGS> [<PATH_TO_SETTINGS> ...]")
 
     # get list of settings paths
     settings_paths = sys.argv[1:]

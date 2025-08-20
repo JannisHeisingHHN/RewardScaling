@@ -43,21 +43,15 @@ def get_exponential_fn(start: float, factor: float) -> Callable[[float], float]:
     out.__doc__ = f"exponential_fn({start=}, {factor=})"
     return out
 
-# def lr_fn(epoch: int): # TODO: add to settings.toml
-#     '''lr = 3e-4 * (1 - 3e-4)**epoch'''
-#     lr = 3e-4 * (1 - 3e-4)**epoch
+def custom_reward(state: NDArray, action: NDArray | Tensor, game_reward: NDArray): # TODO: add to settings.toml?
+    '''reward = ((y_pos + 1) / 2)^2 + flag_bonus'''
+    x_pos = state[:, 0] # x-position of cart
+    y_pos = np.sin(3 * x_pos) # y-position of cart
+    pos_reward = ((y_pos + 1) / 2)**2 # give reward based on cart position
+    flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the position reward
+    reward = pos_reward + flag_bonus
 
-#     return float(lr)
-
-# def custom_reward(state: NDArray, action: NDArray | Tensor, game_reward: NDArray): # TODO: add to settings.toml?
-#     '''reward = ((y_pos + 1) / 2)^2 + flag_bonus'''
-#     x_pos = state[:, 0] # x-position of cart
-#     y_pos = np.sin(3 * x_pos) # y-position of cart
-#     pos_reward = ((y_pos + 1) / 2)**2 # give reward based on cart position
-#     flag_bonus = 2 * (x_pos >= 0.5) # reward for reaching the flag (essentially the game reward), scaled so it's always greater than the position reward
-#     reward = pos_reward + flag_bonus
-
-#     return reward
+    return reward
 
 
 def obs_to_state(obs, device: Device):
@@ -234,7 +228,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     show_tqdm = settings['setup'].get('show_tqdm', True)
 
     params = settings['parameters']
-    discretise: int | bool = params.get('discretise', False)
+    discretise: int = params.get('discretise', 0)
 
     # define variable parameters
     gamma_fn = get_logistic_fn(**params['gamma'])
@@ -267,8 +261,8 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     if 'registration' in params:
         gym.register(id = params['env']['id'], **params['registration'])
 
-    print("Done!")
     if use_prints:
+        print("Done!")
         print(f"\tExperiment: {mlflow_experiment}")
         print(f"\tRun: {mlflow_run_name}")
         print(f"\tMlflow: {['off', 'on'][use_mlflow]}")
@@ -280,7 +274,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
 
     env_generator = (
             (lambda: DiscretiseAction(gym.make(**params['env']), n_actions=discretise))
-        if isinstance(discretise, int) else
+        if discretise else
             (lambda: gym.make(**params['env']))
     )
 
@@ -320,7 +314,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         'epsilon_fn': epsilon_fn,
         'gamma_fn': gamma_fn,
         'target_update': params['target_update'],
-        # 'custom_reward': custom_reward,
+        'custom_reward': custom_reward,
         'start_episode': params['start_episode'],
         'save_interval': params['save_interval'],
         'save_path': params['save_path'],
@@ -345,7 +339,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
             mlflow.log_param("lr_fn", lr_fn.__doc__)
             mlflow.log_param("epsilon_fn", epsilon_fn.__doc__)
             mlflow.log_param("gamma_fn", gamma_fn.__doc__)
-            # mlflow.log_param("custom_reward", custom_reward.__doc__)
+            mlflow.log_param("custom_reward", custom_reward.__doc__)
 
             try:
                 train_agent(

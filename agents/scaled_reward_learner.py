@@ -1,7 +1,7 @@
 import torch as tc
 from torch import nn
 
-from .ffnn import FFNN
+from .qffnn import QFFNN
 from .learner import Learner
 from .replay_buffer import ReplayBuffer
 
@@ -9,52 +9,6 @@ from typing import Callable
 from numpy.typing import NDArray
 from torch.types import Device
 from torch import Tensor
-
-
-class QFFNN(FFNN):
-    '''Copy of FFNN whose forward function accepts two inputs instead of one and whose output is squeezed (nicer interface for Q-learning)'''
-    def forward(self, state: Tensor, action: Tensor):
-        X = tc.concat([state, action], dim=-1)
-        return super().forward(X).squeeze()
-    
-
-    def get_q(self, states: Tensor, actions: Tensor):
-        '''
-        states has shape (N, D) and actions has shape (M, C), where<br>
-        N: number of states (batch size)<br>
-        D: number of features in a state<br>
-        M: number of actions (must be constant across states)<br>
-        C: number of features in an action<br>
-        If `state` is one-dimensional, `N` is assumed to be 1, and likewise for `actions` and `C`
-        '''
-        # add dimensions if necessary
-        states = tc.atleast_2d(states) # batch dimension
-        actions = actions.view(len(actions), -1) # action feature dimension
-
-        N = len(states)
-        M = len(actions)
-
-        # copy states and actions to match with one-another
-        S = states.repeat_interleave(M, 0)
-        A = actions.repeat(N, 1)
-
-        # get Q-values
-        Q: Tensor = self(S, A)
-
-        # reshape to (N, C)
-        Q = Q.view(N, -1)
-
-        return Q
-
-
-    def get_max_q(self, state: Tensor, actions: Tensor):
-        # get Q-values
-        Q = self.get_q(state, actions)
-
-        # get maximal Q-value per state
-        MQ = Q.max(1)[0].squeeze()
-
-        return MQ
 
 
 def _bellmann_std(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
@@ -79,7 +33,6 @@ class ScaledRewardLearner(Learner):
         self,
         architecture: list[int | nn.Module],
         n_actions: int,
-        polyak: float,
         use_reward_scaling: bool,
         device: Device,
         *args,
@@ -92,15 +45,14 @@ class ScaledRewardLearner(Learner):
 
         self.optim_q1 = tc.optim.Adam(self.q1.parameters())
         self.optim_q2 = tc.optim.Adam(self.q2.parameters())
-        self.mse_loss: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
+        self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.MSELoss()
+        # self.loss_fn: Callable[[tc.Tensor, tc.Tensor], tc.Tensor] = nn.SmoothL1Loss() # TODO test if this works better
 
         self.q1_target = self.q1.clone()
         self.q2_target = self.q2.clone()
 
         self.n_actions = n_actions
-        self.actions_onehot = tc.eye(n_actions, dtype=tc.int)
-
-        self.rho = polyak
+        self.actions_onehot = tc.eye(n_actions)
 
         # The following if-else morally belongs in training_session (where self.bellman_fn is used) as its purpose is to determine
         # how to calculate the Q-functions' targets, but because I'm obsessed with runtime optimization I moved it here
@@ -111,11 +63,8 @@ class ScaledRewardLearner(Learner):
 
 
     def set_device(self, device: Device):
-        self.to(device)
         self.actions_onehot = self.actions_onehot.to(device)
-        self.device = device
-
-        return self
+        return super().set_device(device)
 
 
     def to_dict(self):
@@ -133,7 +82,6 @@ class ScaledRewardLearner(Learner):
             'q1_target': self.q1_target.state_dict(),
             'q2_target': self.q2_target.state_dict(),
 
-            'rho': self.rho,
             'use_reward_scaling': self.use_reward_scaling,
         }
 
@@ -146,7 +94,6 @@ class ScaledRewardLearner(Learner):
         out = cls(
             architecture = model_dict['architecture'],
             n_actions = model_dict['n_actions'],
-            polyak = model_dict['rho'],
             use_reward_scaling = model_dict['use_reward_scaling'],
             device = device,
         )
@@ -174,17 +121,6 @@ class ScaledRewardLearner(Learner):
         return i_action
 
 
-    def target_update_polyak(self):
-        for q, q_target in zip([self.q1, self.q2], [self.q1_target, self.q2_target]):
-            s = q.state_dict()
-            s_target = q_target.state_dict()
-            s_new = {}
-            for k in s_target.keys():
-                s_new[k] = (1 - self.rho) * s_target[k] + self.rho * s[k]
-
-            q_target.load_state_dict(s_new)
-
-
     def mlflow_get_sample_weights(self) -> dict[str, float]:
         out = {
             "weight_q1": float(self.q1.layers[0].weight[0, 0]), # type: ignore
@@ -194,6 +130,16 @@ class ScaledRewardLearner(Learner):
         }
 
         return out
+
+
+    @property
+    def active_submodels(self) -> list[nn.Module]:
+        return [self.q1, self.q2]
+
+
+    @property
+    def target_submodels(self) -> list[nn.Module]:
+        return [self.q1_target, self.q2_target]
 
 
     def training_session(
@@ -230,20 +176,17 @@ class ScaledRewardLearner(Learner):
 
             # perform gradient step for q1-network
             q1 = self.q1(state, action)
-            loss_q1 = self.mse_loss(y.detach(), q1)
+            loss_q1 = self.loss_fn(y.detach(), q1)
             self.optim_q1.zero_grad()
             loss_q1.backward()
             self.optim_q1.step()
 
             # perform gradient step for q2-network
             q2 = self.q2(state, action)
-            loss_q2 = self.mse_loss(y.detach(), q2)
+            loss_q2 = self.loss_fn(y.detach(), q2)
             self.optim_q2.zero_grad()
             loss_q2.backward()
             self.optim_q2.step()
-
-            # update target networks
-            self.target_update_polyak()
 
             # track losses
             mean_loss_q1 += float(loss_q1)
