@@ -103,7 +103,7 @@ def train_agent(
     gamma_fn: Callable[[int], float],
     target_update: float | int,
     custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None = None,
-    start_episode: int = 0,
+    start_episode: int | None = None,
     save_interval: int | None = None,
     save_path: str | Path | None = None,
     show_tqdm: dict[str, Any] | bool = True,
@@ -130,8 +130,11 @@ def train_agent(
     )
 
     # save untrained model
-    if start_episode == 0 and save_path is not None:
-        agent.save(save_path, 0)
+    if start_episode is None:
+        start_episode = 0
+
+        if save_path is not None:
+            agent.save(save_path, 0)
 
     # initialize replay buffer
     if isinstance(replay_buffer, int):
@@ -365,7 +368,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         'gamma_fn': gamma_fn,
         'target_update': params['target_update'],
         'custom_reward': custom_reward,
-        'start_episode': params['start_episode'],
+        'start_episode': start_episode,
         'save_interval': params['save_interval'],
         'save_path': params['save_path'],
         'show_tqdm': show_tqdm,
