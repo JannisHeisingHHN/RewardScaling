@@ -180,8 +180,7 @@ class BasicLearner(Learner):
 
         for _ in range(n_epochs):
             # sample from replay buffer
-            to_tensor = lambda x: tc.stack(x)
-            state, action, reward, next_state, terminated, truncated = map(to_tensor, replay_buffer.sample(batch_size))
+            state, action, reward, next_state, terminated, truncated = replay_buffer.sample(batch_size)
 
             # compute target q-value for q-networks
             with tc.no_grad():

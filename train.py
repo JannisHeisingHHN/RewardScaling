@@ -116,6 +116,7 @@ def train_agent(
     '''
     Training algorithm for a Q-learning agent in a gym environment with a discrete action space
 
+    * replay_buffer: Either a replay buffer or the maximum length of the replay buffer.
     * target_update: If float, uses polyak averaging. If int, uses copy with the given periodicity.
     * custom_reward: Maps `(observation, action, game_reward)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
     * show_tqdm: Whether to use the tqm progress bar. May also be a dictionary of arguments, which are then passed to `trange`.
@@ -142,9 +143,7 @@ def train_agent(
 
     # initialize replay buffer
     if isinstance(replay_buffer, int):
-        replay_buffer = ReplayBuffer(6, maxlen=replay_buffer)
-    else:
-        assert replay_buffer.n_fields == 6, "Replay buffer must have 6 fields!"
+        replay_buffer = ReplayBuffer(replay_buffer, agent.device)
 
     # create action lookup
     n_actions = int(env.action_space.nvec[0]) # type: ignore
@@ -356,7 +355,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
             seed = seed,
         )
 
-    replay_buffer = ReplayBuffer(6, params['replay_buffer_size'])
+    replay_buffer = ReplayBuffer(params['replay_buffer_size'], DEVICE)
 
     if use_prints: print(" Done!\nTraining...")
 

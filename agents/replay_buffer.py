@@ -1,52 +1,78 @@
-from collections import deque
 import numpy as np
+import torch as tc
 
-# TODO right now the replay buffer returns lists that need to be stacked to tensors. This is highly inefficient.
-# Change buffer to store tensors (or arrays) for massive speed boost
+from torch.types import Device
+from typing import Iterable, Any
+
+IndexType = int | slice | Any # just anything that can be passed to a pytorch tensor. I can't be bothered to write it all out. Have you seen the type hint of torch.Tensor.__getitem__ ??
+
+
 class ReplayBuffer:
-    '''Simple replay buffer designed for the application in reinforcement learning'''
-    def __init__(self, n_fields: int, maxlen: int | None = None):
-        '''* n_fields: Number of fields that are stored in each step (e.g. 4 for SARS)'''
-        self.n_fields = n_fields
-        self.buffer = deque(maxlen=maxlen)
+    '''Simple replay buffer designed for applications in reinforcement learning. Internal buffers are pytorch tensors.'''
+    def __init__(self, maxlen: int, device: Device):
+        '''
+        * maxlen: Maximum buffer length
+        * device: Device of the buffer tensors
+        '''
+        if maxlen < 1:
+            raise ValueError(f"maxlen must be at least 1 but is {maxlen}.")
+
+        self.maxlen = maxlen
+        self.device = device
+
+        self._i = 0
+        self._size = 0
 
 
-    def add(self, *args):
+    def _initialise_buffers(self, *args: tc.Tensor):
+        '''Initialises buffers and overwrites itself'''
+        # initialise buffers
+        self.buffers = [tc.zeros([self.maxlen] + list(s.shape), device=self.device, dtype=s.dtype) for s in args]
+
+        # overwrite this function with a dummy function
+        self._initialise_buffers = lambda *args: None
+
+
+    def add(self, *args: tc.Tensor):
         '''Add an entry'''
-        assert len(args) == self.n_fields, "Wrong number of fields!"
-        self.buffer.append(args)
+        self._initialise_buffers(*args)
+
+        for buffer, value in zip(self.buffers, args, strict=True):
+            buffer[self._i] = value
+        
+        self._size = max(self._size, self._i + 1)
+        self._i = (self._i + 1) % self.maxlen
 
 
-    def add_iter(self, *args):
+    def add_iter(self, *args: Iterable[tc.Tensor]):
         '''
         Add multiple entries at once.
-        * args: tuple of lists, one for each field and all with the same length
+        * args: Iterables of tensors, one for each field and all with the same length
         '''
         for x in zip(*args, strict=True):
             self.add(*x)
 
 
-    def __getitem__(self, i: int):
-        return self.buffer[i]
+    def sample(self, n_samples: int, random: bool = True) -> tuple[tc.Tensor, ...]:
+        '''Sample from buffer, either from the top or at random. Returns one tensor per field'''
+        if n_samples > len(self):
+            raise ValueError(f"Number of samples exceeds buffer length ({n_samples} > {len(self)}).")
 
-
-    def sample(self, n_samples: int, random: bool = True):
-        '''Sample from buffer, either from the top or at random. Returns one list per field'''
-        out = tuple(list() for _ in range(self.n_fields))
-
-        idc = (
-                np.random.choice(len(self.buffer), n_samples, replace=False)
+        idc = tc.tensor(
+                np.random.choice(len(self), n_samples, replace=False)
             if random else
-                list(range(len(self.buffer) - n_samples, len(self.buffer)))
+                list(range(len(self) - n_samples, len(self))),
+            device = self.device
         )
 
-        for i in idc:
-            sample = self[i]
-            for l, v in zip(out, sample):
-                l.append(v)
+        out = self[idc]
 
         return out
+
+
+    def __getitem__(self, i: IndexType) -> tuple[tc.Tensor, ...]:
+        return tuple(b[i] for b in self.buffers)
     
 
     def __len__(self) -> int:
-        return len(self.buffer)
+        return self._size
