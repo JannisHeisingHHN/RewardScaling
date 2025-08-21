@@ -2,6 +2,7 @@ from train import start_training
 import toml
 import multiprocessing as mp
 from tqdm import tqdm
+import random
 
 # this line is supposed to make tqdm bar placement more consistent, but I'm sceptical
 tqdm.set_lock(mp.RLock())
@@ -19,7 +20,7 @@ def clone_dict(d: dict):
     return out
 
 
-def run_experiments(settings_paths: list[str]):
+def run_experiments(settings_paths: list[str], add_seed: bool = True):
     # load and preprocess all settings files
     settings_ready = []
     for i, sp in enumerate(settings_paths):
@@ -42,6 +43,10 @@ def run_experiments(settings_paths: list[str]):
                 'position': i,
                 'leave': True,
             }
+
+        # add seed
+        if add_seed:
+            settings['parameters']['seed'] = int(random.random() * 1e6)
 
         settings_ready.append(settings)
 

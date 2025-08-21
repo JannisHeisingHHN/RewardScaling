@@ -313,7 +313,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         gym.register(id = params['env']['id'], **params['registration'])
 
     if use_prints:
-        print("Done!")
+        print(" Done!")
         print(f"\tExperiment: {mlflow_experiment}")
         print(f"\tRun: {mlflow_run_name}")
         print(f"\tMlflow: {['off', 'on'][use_mlflow]}")
@@ -343,11 +343,13 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         with tc.serialization.safe_globals([nn.BatchNorm1d]):
             agent = ModelClass.load(params['save_path'], start_episode, DEVICE)
     else:
+        seed = params.get('seed', None)
         agent = ModelClass(
             architecture = [state_size + n_actions] + architecture_hidden + [1],
             n_actions = n_actions,
             use_reward_scaling=params['use_reward_scaling'],
             device = DEVICE,
+            seed = seed,
         )
 
     replay_buffer = ReplayBuffer(6, params['replay_buffer_size'])

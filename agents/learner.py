@@ -14,6 +14,12 @@ from typing import Any, Self
 
 class Learner(nn.Module, ABC):
     '''Interface for all my different agent versions'''
+    def __init__(self, seed = None, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        if seed is not None:
+            tc.manual_seed(seed)
+
 
     @abstractmethod
     def act(self, state: Tensor) -> NDArray:
