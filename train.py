@@ -56,8 +56,8 @@ def get_step_fn(x: list[float], y: list[float]) -> Callable[[float], float]:
     if not (np.diff(x) >= 0).all():
         raise ValueError("x must be monotonically increasing.")
 
-    x_np = np.concat([[float("-inf")], x, [float("inf")]])
-    y_np = np.concat([y, [y[-1]]])
+    x_np = np.concatenate([[float("-inf")], x, [float("inf")]])
+    y_np = np.concatenate([y, [y[-1]]])
 
     out = lambda x: float(y_np[(x >= x_np).argmin() - 1])
     out.__doc__ = f"step_fn({x=}, {y=})"
