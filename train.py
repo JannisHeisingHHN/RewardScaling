@@ -20,7 +20,7 @@ import mlflow
 
 
 #
-# FILE USAGE: python train_mountaincar.py <PATH_TO_SETTINGS>
+# FILE USAGE: python train.py <PATH_TO_SETTINGS>
 #
 
 
@@ -261,8 +261,6 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     mlflow_tags = setup.get('mlflow_tags', {})
     show_tqdm = setup.get('show_tqdm', True)
 
-    discretise: int = params.get('discretise', 0)
-
     # define variable parameters
     gamma_fn = get_custom_fn(**params['gamma'])
     epsilon_fn = get_custom_fn(**params['epsilon'])
@@ -322,6 +320,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     # initialise environment
     if use_prints: print("Initialising environment and model...", end="")
 
+    discretise: int = params.get('discretise', 0)
     env_generator = (
             (lambda: DiscretiseAction(gym.make(**params['env']), n_actions=discretise))
         if discretise else
@@ -335,10 +334,11 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     # initialize agent
     ModelClass: type[Learner] = eval(params['model_class'])
 
-    if (se := params['start_episode']) > 0:
+    start_episode = params.get('start_episode', None)
+    if start_episode is not None:
         # torch.load doesn't know that BatchNorm is safe and raises an error by default (to prevent arbitrary code execution)
         with tc.serialization.safe_globals([nn.BatchNorm1d]):
-            agent = ModelClass.load(params['save_path'], se, DEVICE)
+            agent = ModelClass.load(params['save_path'], start_episode, DEVICE)
     else:
         agent = ModelClass(
             architecture = [state_size + n_actions] + architecture_hidden + [1],

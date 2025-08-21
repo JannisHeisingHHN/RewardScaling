@@ -40,6 +40,6 @@ learning_rate = {fn_type = "exponential", start = 3e-4, factor = 0.9997}        
 replay_buffer_size = 100_000
 
 # save parameters
-start_episode = 0
+# start_episode = 0
 save_interval = 10
 save_path = "weights/pendulum/full_plain"
