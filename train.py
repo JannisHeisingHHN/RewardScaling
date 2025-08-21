@@ -18,6 +18,10 @@ import toml
 from tqdm import trange
 import mlflow
 
+# these are solely to suppress mlflow's prints. Wouldn't it be nice if there was a flag for those?
+import sys
+import inspect
+
 
 #
 # FILE USAGE: python train.py <PATH_TO_SETTINGS>
@@ -383,6 +387,21 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
             use_mlflow = False
         )
     else:
+        # remove annoying mlflow prints
+        class FilteredStdout:
+            def write(self, text: str):
+                caller_name: str = inspect.currentframe().f_back.f_globals['__name__'] # type: ignore
+
+                if caller_name.startswith("mlflow"):
+                    return
+
+                sys.__stdout__.write(text)
+
+            def flush(self):
+                sys.__stdout__.flush()
+
+        sys.stdout = FilteredStdout()
+
         # make sure to have an mlflow server running with "mlflow server --host 127.0.0.1 --port 8080"
         mlflow.set_tracking_uri(mlflow_uri)
         mlflow.set_experiment(mlflow_experiment)
