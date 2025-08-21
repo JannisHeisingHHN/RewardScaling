@@ -32,7 +32,7 @@ target_update = 0.85
 use_reward_scaling = true
 
 # variable parameters
-gamma = {fn_type = "step", x = [10, 20, 30], y = [0, 0.3, 0.6, 0.95]}               # discount factor
+gamma = {fn_type = "step", x = [10, 20, 30], y = [0.0, 0.3, 0.6, 0.95]}             # discount factor
 epsilon = {fn_type = "logistic", start = 1, end = 0.05, midpoint = 30, rate = 0.1}  # chance for random action
 learning_rate = {fn_type = "exponential", start = 3e-4, factor = 0.9997}            # learning rate
 
