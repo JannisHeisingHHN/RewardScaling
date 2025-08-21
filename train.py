@@ -251,13 +251,16 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     # load settings
     if use_prints: print("Loading settings...", end="")
 
-    use_mlflow = settings['setup']['use_mlflow']
-    mlflow_run_name = settings['setup'].get('mlflow_run_name', "norun")
-    mlflow_uri = settings['setup'].get('mlflow_uri', "nouri")
-    mlflow_experiment = settings['setup'].get('mlflow_experiment', "noname")
-    show_tqdm = settings['setup'].get('show_tqdm', True)
-
+    setup: dict[str, Any] = settings['setup']
     params: dict[str, Any] = settings['parameters']
+
+    use_mlflow = setup['use_mlflow']
+    mlflow_run_name = setup.get('mlflow_run_name', "norun")
+    mlflow_uri = setup.get('mlflow_uri', "nouri")
+    mlflow_experiment = setup.get('mlflow_experiment', "noname")
+    mlflow_tags = setup.get('mlflow_tags', {})
+    show_tqdm = setup.get('show_tqdm', True)
+
     discretise: int = params.get('discretise', 0)
 
     # define variable parameters
@@ -369,7 +372,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     }
 
     # start training
-    if use_mlflow == False: # this strange check is necessary because use_mlflow may be an empty dictionary, which should still enable mlflow
+    if use_mlflow is False: # this strange check is necessary because use_mlflow may be an empty dictionary, which would be evaluated as False but should still enable mlflow
         train_agent(
             **train_args,
             use_mlflow = False
@@ -381,6 +384,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
 
         with mlflow.start_run(run_name=mlflow_run_name):
             mlflow.log_params(params)
+            mlflow.set_tags(mlflow_tags)
 
             try:
                 train_agent(
