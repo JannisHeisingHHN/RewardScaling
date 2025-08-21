@@ -2,7 +2,7 @@
 
 device = ["cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Pendulum-Full-Scaled-Faster gamma"
+mlflow_run_name = "Pendulum-Full-Scaled-Gamma step"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_Pendulum"
@@ -32,9 +32,9 @@ target_update = 0.85
 use_reward_scaling = true
 
 # variable parameters
-gamma = {start = 0.0, end = 0.95, midpoint = 30, rate = 0.1}    # discount factor
-epsilon = {start = 1, end = 0.05, midpoint = 30, rate = 0.1}    # chance for random action
-learning_rate = {start = 3e-4, factor = 0.9997}                 # learning rate (exponential decay)
+gamma = {fn_type = "step", x = [10], y = [0, 0.95]}                                 # discount factor
+epsilon = {fn_type = "logistic", start = 1, end = 0.05, midpoint = 30, rate = 0.1}  # chance for random action
+learning_rate = {fn_type = "exponential", start = 3e-4, factor = 0.9997}            # learning rate
 
 # replay buffer
 replay_buffer_size = 100_000

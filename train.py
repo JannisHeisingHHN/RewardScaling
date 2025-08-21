@@ -43,6 +43,47 @@ def get_exponential_fn(start: float, factor: float) -> Callable[[float], float]:
     return out
 
 
+def get_step_fn(x: list[float], y: list[float]) -> Callable[[float], float]:
+    '''
+    Create a step function `f`. For example, if `x = [1, 2]` and `y = [3, 4, 5]`, then `f(-∞) = f(0.9) = 3`,
+    `f(1) = f(1.9) = 4` and `f(2) = f(∞) = 5`.
+
+    `y` must have precisely one entry more than `x`.
+    '''
+    if len(x) + 1 != len(y):
+        raise ValueError(f"len(x) must be one less than len(y), but got {len(x)} and {len(y)}.")
+
+    if not (np.diff(x) >= 0).all():
+        raise ValueError("x must be monotonically increasing.")
+
+    x_np = np.concat([[float("-inf")], x, [float("inf")]])
+    y_np = np.concat([y, [y[-1]]])
+
+    out = lambda x: float(y_np[(x >= x_np).argmin() - 1])
+    out.__doc__ = f"step_fn({x=}, {y=})"
+
+    return out
+
+
+def get_constant_fn(c: float) -> Callable[[float], float]:
+    '''Create a constant function with value `c`.'''
+    out = lambda x: c
+    out.__doc__ = f"constant_fn({c=})"
+
+    return out
+
+
+def get_custom_fn(fn_type: str, **params) -> Callable[[float], float]:
+    '''Create a custom function of specified type.'''
+    match fn_type:
+        case "logistic": return get_logistic_fn(**params)
+        case "exponential": return get_exponential_fn(**params)
+        case "step": return get_step_fn(**params)
+        case "constant": return get_constant_fn(**params)
+    
+    raise ValueError(f"Invalid function type '{fn_type}'.")
+
+
 def obs_to_state(obs, device: Device):
     '''Converts output from a gym environment to a suitable tensor'''
     state = tc.tensor(obs, dtype=tc.float, device=device)
@@ -220,9 +261,9 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     discretise: int = params.get('discretise', 0)
 
     # define variable parameters
-    gamma_fn = get_logistic_fn(**params['gamma'])
-    epsilon_fn = get_logistic_fn(**params['epsilon'])
-    lr_fn = get_exponential_fn(**params['learning_rate'])
+    gamma_fn = get_custom_fn(**params['gamma'])
+    epsilon_fn = get_custom_fn(**params['epsilon'])
+    lr_fn = get_custom_fn(**params['learning_rate'])
 
     # the model architecture needs to be evaluated
     architecture_hidden = [eval(layer) for layer in params['architecture_hidden']]
