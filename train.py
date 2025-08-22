@@ -174,11 +174,12 @@ def train_agent(
         # determine epsilon
         epsilon = epsilon_fn(i)
 
-        # initialise main reward metrics
+        # initialise main metrics
         total_reward = 0.
         mean_reward = 0.
+        mean_steps = 0.
 
-        # initialise auxiliary reward metrics
+        # initialise auxiliary metrics
         reward_until_reset = tc.zeros(env.num_envs, device=agent.device)                # accumulated reward per environment
         t_last_reset = tc.zeros(env.num_envs, dtype=tc.int, device=agent.device) - 1    # time of last reset per environment (they're all initially reset "at step -1")
         reset_count = 0                                                                 # reset count for all environments (to divide total_reward & mean_reward by)
@@ -227,12 +228,15 @@ def train_agent(
                     # reset environment
                     e.reset()
 
-                    # determine accumulated reward of that environment
+                    # determine intermediate values
                     new_reward = float(reward_until_reset[k])
+                    steps = int(t - t_last_reset[k])
 
-                    # update total and mean tallies
+                    # update main metrics
                     total_reward += new_reward
-                    mean_reward += new_reward / int(t - t_last_reset[k])
+                    mean_reward += new_reward / steps
+                    mean_steps += steps
+
 
                     # update auxiliary metrics
                     reward_until_reset[k] = 0
@@ -246,10 +250,12 @@ def train_agent(
         if reset_count == 0: # none of the environments were ever reset -> take average accumulated reward
             total_reward = float(sum(reward_until_reset)) / env.num_envs
             mean_reward = total_reward / n_steps_per_episode
+            mean_steps = n_steps_per_episode
         else: # some resets took place -> take average reward accumulated before those resets
             # no division by env.num_envs necessary because reset_count is accumulated across environments
             total_reward /= reset_count
             mean_reward /= reset_count
+            mean_steps /= reset_count
 
         # train agent
         if len(replay_buffer) >= batch_size:
@@ -283,6 +289,7 @@ def train_agent(
         if use_mlflow:
             mlflow.log_metric("total_reward", total_reward, step=i)
             mlflow.log_metric("mean_reward", mean_reward, step=i)
+            mlflow.log_metric("mean_steps", mean_steps, step=i)
             mlflow.log_metric("reset_count", reset_count / env.num_envs, step=i)
             mlflow.log_metric("buffer_size", len(replay_buffer), step=i)
             mlflow.log_metric("epsilon", epsilon, step=i)
