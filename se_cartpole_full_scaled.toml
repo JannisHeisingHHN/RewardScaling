@@ -2,7 +2,7 @@
 
 device = ["cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Full-Scaled-More envs, gamma=0.99"
+mlflow_run_name = "Full-Scaled-No TruncIsTerm"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_Cartpole"
@@ -13,7 +13,6 @@ mlflow_experiment = "jheis_SRL_Cartpole"
 # environment
 env = {id = "CartPole-v1", max_episode_steps = 500}
 num_envs = 11
-truncation_is_termination = true
 
 # model architecture (excluding input & output size since these are determined by the environment)
 # because TOML doesn't support heterogeneous arrays, all entries must be strings, which are passed through eval()
@@ -21,18 +20,31 @@ architecture_hidden = ["100", "100"]
 
 # training lengths
 n_episodes = 200
-n_steps_per_episode = 501
+n_steps_per_episode = 499
 n_train_epochs = 32 # training cycles per epoch
 batch_size = 128
 
 # model parameters
 model_class = "ScaledRewardLearner"
 target_update = 0.85
-# target_update = 20
 use_reward_scaling = true
 
+# Sooooo CartPole is supposed to have the option to enable so-called "Sutton-Barto reward" (which is the correct reward type and the default reward is stupid and wrong).
+# For whatever reason, I don't have that option, so I'm using my custom_reward to simply mimic that behaviour
+
+# Custom reward as python code; must include a function "custom_reward(observation, action, game_reward, terminated) -> NDArray"
+# Is passed through exec(). Due to toml weirdness a docstring is not (easily) possible; put an explanation in the "custom_reward_doc" field below
+custom_reward = """
+def custom_reward(state, action, game_reward, terminated):
+    terminated = terminated + 0. # shady way of converting a pytorch tensors's dtype from boolean to float without explicitly referencing pytorch
+    reward = -terminated
+
+    return reward
+"""
+custom_reward_doc = "reward = -terminated"
+
 # variable parameters
-gamma = {fn_type = "step", x = [10, 20], y = [0.0, 0.4,0.99]}                       # discount factor
+gamma = {fn_type = "step", x = [10, 20, 50], y = [0.0, 0.4, 0.8, 0.99]}             # discount factor
 epsilon = {fn_type = "logistic", start = 1, end = 0.05, midpoint = 30, rate = 0.1}  # chance for random action
 learning_rate = {fn_type = "exponential", start = 3e-4, factor = 0.9997}            # learning rate
 
@@ -40,6 +52,5 @@ learning_rate = {fn_type = "exponential", start = 3e-4, factor = 0.9997}        
 replay_buffer_size = 100_000
 
 # save parameters
-# start_episode = 0
 save_interval = 10
 save_path = "weights/cartpole/full_scaled"

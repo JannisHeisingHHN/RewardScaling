@@ -106,7 +106,7 @@ def train_agent(
     epsilon_fn: Callable[[int], float],
     gamma_fn: Callable[[int], float],
     target_update: float | int,
-    custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None = None,
+    custom_reward: Callable[[Tensor, Tensor, Tensor, Tensor], Tensor] | None = None,
     truncation_is_termination: bool = False,
     start_episode: int | None = None,
     save_interval: int | None = None,
@@ -119,7 +119,7 @@ def train_agent(
 
     * replay_buffer: Either a replay buffer or the maximum length of the replay buffer.
     * target_update: If float, uses polyak averaging. If int, uses copy with the given periodicity.
-    * custom_reward: Maps `(observation, action, game_reward)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
+    * custom_reward: Maps `(state, action, game_reward, terminated)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
     * truncation_is_termination: If true, truncation (which usually has no effect on training) is treated as termination (which changes the target)
     * show_tqdm: Whether to use the tqm progress bar. May also be a dictionary of arguments, which are then passed to `trange`.
     '''
@@ -130,10 +130,10 @@ def train_agent(
     assert (save_interval is None) == (save_path is None), "Parameters 'save_interval' and 'save_path' must either both be given or both be None!"
 
     # define reward function
-    reward_fn: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] = (
-            (lambda o, a, r: r) # only use game reward
+    reward_fn: Callable[[Tensor, Tensor, Tensor, Tensor], Tensor] = (
+            (lambda o, a, r, t: r)                          # only use game reward
         if custom_reward is None else
-            (lambda o, a, r: custom_reward(o, a, r)) # use custom reward
+            (lambda o, a, r, t: custom_reward(o, a, r, t))  # use custom reward
     )
 
     # save untrained model
@@ -207,9 +207,12 @@ def train_agent(
             # convert values to tensors
             action = actions_onehot[tc.from_numpy(action)]
             next_state = obs_to_state(observation, agent.device)
-            reward = tc.tensor(reward_fn(observation, action, _reward), dtype=tc.float, device=agent.device)
             terminated = tc.tensor(_terminated, dtype=tc.bool, device=agent.device)
             truncated = tc.tensor(_truncated, dtype=tc.bool, device=agent.device)
+            _reward_tc = tc.tensor(_reward, dtype=tc.float, device=agent.device)
+
+            # compute reward
+            reward = reward_fn(state, action, _reward_tc, terminated)
 
             # accumulate total reward
             reward_until_reset += reward
@@ -440,7 +443,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
 
         sys.stdout = FilteredStdout()
 
-        # make sure to have an mlflow server running with "mlflow server --host 127.0.0.1 --port 8080"
+        # make sure to have an mlflow server running
         mlflow.set_tracking_uri(mlflow_uri)
         mlflow.set_experiment(mlflow_experiment)
 
