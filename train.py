@@ -107,6 +107,7 @@ def train_agent(
     gamma_fn: Callable[[int], float],
     target_update: float | int,
     custom_reward: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] | None = None,
+    truncation_is_termination: bool = False,
     start_episode: int | None = None,
     save_interval: int | None = None,
     save_path: str | Path | None = None,
@@ -119,6 +120,7 @@ def train_agent(
     * replay_buffer: Either a replay buffer or the maximum length of the replay buffer.
     * target_update: If float, uses polyak averaging. If int, uses copy with the given periodicity.
     * custom_reward: Maps `(observation, action, game_reward)` to a custom reward. `game_reward` is the reward given by the environment. If set, the custom reward replaces the game reward.
+    * truncation_is_termination: If true, truncation (which usually has no effect on training) is treated as termination (which changes the target)
     * show_tqdm: Whether to use the tqm progress bar. May also be a dictionary of arguments, which are then passed to `trange`.
     '''
     # make sure that the action space has the right properties
@@ -128,7 +130,7 @@ def train_agent(
     assert (save_interval is None) == (save_path is None), "Parameters 'save_interval' and 'save_path' must either both be given or both be None!"
 
     # define reward function
-    reward_fn = (
+    reward_fn: Callable[[NDArray, NDArray | Tensor, NDArray], NDArray] = (
             (lambda o, a, r: r) # only use game reward
         if custom_reward is None else
             (lambda o, a, r: custom_reward(o, a, r)) # use custom reward
@@ -169,15 +171,24 @@ def train_agent(
         observation, _ = env.reset()
         state = obs_to_state(observation, agent.device)
 
-        # reset total reward per episode
+        # determine epsilon
+        epsilon = epsilon_fn(i)
+
+        # initialise main reward metrics
         total_reward = 0.
+        mean_reward = 0.
+
+        # initialise auxiliary reward metrics
+        reward_until_reset = tc.zeros(env.num_envs, device=agent.device)                # accumulated reward per environment
+        t_last_reset = tc.zeros(env.num_envs, dtype=tc.int, device=agent.device) - 1    # time of last reset per environment (they're all initially reset "at step -1")
+        reset_count = 0                                                                 # reset count for all environments (to divide total_reward & mean_reward by)
 
         # set agent to eval mode for the duration of the episode
         agent.eval()
 
+        # episode loop
         for t in range(n_steps_per_episode):
             # choose action
-            epsilon = epsilon_fn(i)
             if np.random.rand() < epsilon:
                 # random action
                 action = env.action_space.sample()
@@ -189,28 +200,53 @@ def train_agent(
             # perform action
             observation, _reward, _terminated, _truncated, *_ = env.step(action)
 
-            # convert values to tensors (the detaches are quite probably unnecessary TODO remove?)
-            state = state.detach()
-            action = actions_onehot[tc.from_numpy(action)].detach()
-            next_state = obs_to_state(observation, agent.device).detach()
-            reward = tc.tensor(reward_fn(observation, action, _reward), dtype=tc.float, device=agent.device).detach()
-            terminated = tc.tensor(_terminated, dtype=tc.bool, device=agent.device).detach()
-            truncated = tc.tensor(_truncated, dtype=tc.bool, device=agent.device).detach()
+            # fuse terminated and truncated if desired
+            if truncation_is_termination:
+                _terminated = _terminated | _truncated
+
+            # convert values to tensors
+            action = actions_onehot[tc.from_numpy(action)]
+            next_state = obs_to_state(observation, agent.device)
+            reward = tc.tensor(reward_fn(observation, action, _reward), dtype=tc.float, device=agent.device)
+            terminated = tc.tensor(_terminated, dtype=tc.bool, device=agent.device)
+            truncated = tc.tensor(_truncated, dtype=tc.bool, device=agent.device)
 
             # accumulate total reward
-            total_reward += float(tc.mean(reward)) # type: ignore
+            reward_until_reset += reward
 
             # save to buffer
-            replay_buffer.add_iter(state, action, reward, next_state, terminated, truncated)
+            with tc.no_grad():
+                replay_buffer.add_iter(state, action, reward, next_state, terminated, truncated)
 
-            # if done, stop the episode
-            # Alternatively, one could reset the environment and keep the episode going,
-            # but that would mess with the total_reward metric
-            if terminated.any() or truncated.any(): # TODO: make this work with parallelization and variable episode length
-                break
+            # handle individual environment resets
+            for k, (e, done) in enumerate(zip(env.envs, terminated | truncated)):
+                if done:
+                    # reset environment
+                    e.reset()
+
+                    # determine accumulated reward of that environment
+                    new_reward = float(reward_until_reset[k])
+
+                    # update total and mean tallies
+                    total_reward += new_reward
+                    mean_reward += new_reward / int(t - t_last_reset[k])
+
+                    # update auxiliary metrics
+                    reward_until_reset[k] = 0
+                    reset_count += 1
+                    t_last_reset[k] = t
 
             # update state
             state = next_state
+
+        # rectify total and mean reward
+        if reset_count == 0: # none of the environments were ever reset -> take average accumulated reward
+            total_reward = float(sum(reward_until_reset)) / env.num_envs
+            mean_reward = total_reward / n_steps_per_episode
+        else: # some resets took place -> take average reward accumulated before those resets
+            # no division by env.num_envs necessary because reset_count is accumulated across environments
+            total_reward /= reset_count
+            mean_reward /= reset_count
 
         # train agent
         if len(replay_buffer) >= batch_size:
@@ -243,10 +279,10 @@ def train_agent(
         # log auxiliary metrics
         if use_mlflow:
             mlflow.log_metric("total_reward", total_reward, step=i)
-            mlflow.log_metric("episode_length", t+1, step=i) # type: ignore (t is always bound)
-            mlflow.log_metric("mean_reward", total_reward / (t+1), step=i) # type: ignore (t is always bound)
+            mlflow.log_metric("mean_reward", mean_reward, step=i)
+            mlflow.log_metric("reset_count", reset_count / env.num_envs, step=i)
             mlflow.log_metric("buffer_size", len(replay_buffer), step=i)
-            mlflow.log_metric("epsilon", epsilon, step=i) # type: ignore (epsilon is always bound)
+            mlflow.log_metric("epsilon", epsilon, step=i)
 
         # save model at regular intervals and at the very end
         if save_interval is not None and ((i+1) % save_interval == 0 or i+1 == n_episodes + start_episode):
@@ -333,7 +369,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
             (lambda: gym.make(**params['env']))
     )
 
-    env = gym.vector.SyncVectorEnv([env_generator] * params['num_envs'])
+    env = gym.vector.SyncVectorEnv([env_generator] * params['num_envs']) # TODO change to gym.vector.make (and probably asynchronous)
     state_size = env.observation_space.shape[-1] # type: ignore
     n_actions = int(env.action_space.nvec[0]) # type: ignore
 
@@ -360,6 +396,8 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     if use_prints: print(" Done!\nTraining...")
 
     # determine train arguments
+    truncation_is_termination = params.get('truncation_is_termination', False)
+
     train_args = {
         'env': env,
         'agent': agent,
@@ -373,6 +411,7 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
         'gamma_fn': gamma_fn,
         'target_update': params['target_update'],
         'custom_reward': custom_reward,
+        'truncation_is_termination': truncation_is_termination,
         'start_episode': start_episode,
         'save_interval': params['save_interval'],
         'save_path': params['save_path'],
