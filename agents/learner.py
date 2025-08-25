@@ -8,7 +8,6 @@ from abc import abstractmethod, ABC
 
 from numpy.typing import NDArray
 from torch.types import Device
-from torch import Tensor
 from typing import Any, Self
 
 
@@ -22,10 +21,6 @@ class Learner(nn.Module, ABC):
 
 
     @abstractmethod
-    def act(self, state: Tensor) -> NDArray:
-        '''Choose an action from `actions` based on the state. `state` may be singular or batched'''
-
-    @abstractmethod
     def to_dict(self) -> dict[str, Any]:
         '''Convert model to dictionary'''
 
@@ -33,6 +28,10 @@ class Learner(nn.Module, ABC):
     @abstractmethod
     def from_dict(cls, model_dict: dict[str, Any], device: Device) -> Self:
         '''Load model from dictionary created by `self.to_dict`'''
+
+    @abstractmethod
+    def act(self, state: tc.Tensor) -> tc.Tensor:
+        '''Choose an action based on the state. `state` may be singular or batched'''
 
     @abstractmethod
     def mlflow_get_sample_weights(self) -> dict[str, float]:

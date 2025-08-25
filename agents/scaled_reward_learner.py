@@ -8,10 +8,9 @@ from .replay_buffer import ReplayBuffer
 from typing import Callable
 from numpy.typing import NDArray
 from torch.types import Device
-from torch import Tensor
 
 
-def _bellmann_std(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
+def _bellmann_std(reward: tc.Tensor, future_reward: tc.Tensor, gamma: float, terminated: tc.Tensor):
     '''Standard Bellman function (status quo)'''
     out = reward.clone()
     out[~terminated] += gamma * future_reward
@@ -19,7 +18,7 @@ def _bellmann_std(reward: Tensor, future_reward: Tensor, gamma: float, terminate
     return out
 
 
-def _bellmann_scaled(reward: Tensor, future_reward: Tensor, gamma: float, terminated: Tensor):
+def _bellmann_scaled(reward: tc.Tensor, future_reward: tc.Tensor, gamma: float, terminated: tc.Tensor):
     '''Modified Bellman function with appropriate reward scaling (my new method)'''
     out = reward.clone()
     out[~terminated] *= (1 - gamma)
@@ -90,7 +89,6 @@ class ScaledRewardLearner(Learner):
 
     @classmethod
     def from_dict(cls, model_dict, device):
-        '''Load model from previous checkpoint'''
         out = cls(
             architecture = model_dict['architecture'],
             n_actions = model_dict['n_actions'],
@@ -110,23 +108,23 @@ class ScaledRewardLearner(Learner):
         return out
 
 
-    def act(self, state: Tensor) -> NDArray:
+    def act(self, state: tc.Tensor) -> tc.Tensor:
         # choose action
         q1 = self.q1.get_q(state, self.actions_onehot)
         q2 = self.q2.get_q(state, self.actions_onehot)
 
         q = tc.min(q1, q2)
-        i_action = q.argmax(-1).cpu().numpy()
+        i_action = q.argmax(-1)
 
         return i_action
 
 
     def mlflow_get_sample_weights(self) -> dict[str, float]:
         out = {
-            "weight_q1": float(self.q1.layers[0].weight[0, 0]), # type: ignore
-            "weight_q2": float(self.q2.layers[0].weight[0, 0]), # type: ignore
-            "weight_q1_target": float(self.q1_target.layers[0].weight[0, 0]), # type: ignore
-            "weight_q2_target": float(self.q2_target.layers[0].weight[0, 0]), # type: ignore
+            'weight_q1': float(self.q1.layers[0].weight[0, 0]), # type: ignore
+            'weight_q2': float(self.q2.layers[0].weight[0, 0]), # type: ignore
+            'weight_q1_target': float(self.q1_target.layers[0].weight[0, 0]), # type: ignore
+            'weight_q2_target': float(self.q2_target.layers[0].weight[0, 0]), # type: ignore
         }
 
         return out
@@ -167,7 +165,7 @@ class ScaledRewardLearner(Learner):
                 q1_target = self.q1_target.get_max_q(next_state[~terminated], self.actions_onehot)
                 q2_target = self.q2_target.get_max_q(next_state[~terminated], self.actions_onehot)
 
-                # take those q-values with minimal absolute value instead of the plain minimum to also mitigate negative runoff
+                # take minimum to mitigate runoff
                 q_target = tc.min(q1_target, q2_target)
 
                 # compute bellman function

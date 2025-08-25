@@ -2,7 +2,7 @@
 
 device = ["cuda:0"]
 use_mlflow = true
-mlflow_run_name = "Full-Scaled-No TruncIsTerm"
+mlflow_run_name = "Full-Scaled-Late Gamma=0.999"
 
 mlflow_uri = "http://10.30.20.11:5000"
 mlflow_experiment = "jheis_SRL_Cartpole"
@@ -19,7 +19,7 @@ num_envs = 11
 architecture_hidden = ["100", "100"]
 
 # training lengths
-n_episodes = 200
+n_episodes = 400
 n_steps_per_episode = 499
 n_train_epochs = 32 # training cycles per epoch
 batch_size = 128
@@ -27,7 +27,7 @@ batch_size = 128
 # model parameters
 model_class = "ScaledRewardLearner"
 target_update = 0.85
-use_reward_scaling = true
+model_parameters = {use_reward_scaling = true}
 
 # Sooooo CartPole is supposed to have the option to enable so-called "Sutton-Barto reward" (which is the correct reward type and the default reward is stupid and wrong).
 # For whatever reason, I don't have that option, so I'm using my custom_reward to simply mimic that behaviour
@@ -44,7 +44,7 @@ def custom_reward(state, action, game_reward, terminated):
 custom_reward_doc = "reward = -terminated"
 
 # variable parameters
-gamma = {fn_type = "step", x = [10, 20, 50], y = [0.0, 0.4, 0.8, 0.99]}             # discount factor
+gamma = {fn_type = "step", x = [10, 20, 50, 150], y = [0.0, 0.4, 0.8, 0.99, 0.999]} # discount factor
 epsilon = {fn_type = "logistic", start = 1, end = 0.05, midpoint = 30, rate = 0.1}  # chance for random action
 learning_rate = {fn_type = "exponential", start = 3e-4, factor = 0.9997}            # learning rate
 

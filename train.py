@@ -123,9 +123,6 @@ def train_agent(
     * truncation_is_termination: If true, truncation (which usually has no effect on training) is treated as termination (which changes the target)
     * show_tqdm: Whether to use the tqm progress bar. May also be a dictionary of arguments, which are then passed to `trange`.
     '''
-    # make sure that the action space has the right properties
-    assert isinstance(env.action_space, gym.spaces.Discrete) or isinstance(env.action_space, gym.spaces.MultiDiscrete), "Action space must be discrete!"
-
     # make sure the save params makes sense
     assert (save_interval is None) == (save_path is None), "Parameters 'save_interval' and 'save_path' must either both be given or both be None!"
 
@@ -147,9 +144,17 @@ def train_agent(
     if isinstance(replay_buffer, int):
         replay_buffer = ReplayBuffer(replay_buffer, agent.device)
 
-    # create action lookup
-    n_actions = int(env.action_space.nvec[0]) # type: ignore
-    actions_onehot = tc.eye(n_actions, device=agent.device)
+    # determine environment type
+    is_continuous = isinstance(env.action_space, gym.spaces.Box)
+
+    # create action conversion
+    if is_continuous:
+        f_action = lambda x: tc.from_numpy(x)
+    else:
+        # performs one-hot encoding
+        n_actions = int(env.action_space.nvec[0]) # type: ignore
+        actions_onehot = tc.eye(n_actions, device=agent.device)
+        f_action = lambda x: actions_onehot[tc.from_numpy(x)]
 
     # select target update policy
     use_target_copy = isinstance(target_update, int)
@@ -196,7 +201,7 @@ def train_agent(
             else:
                 # greedy action
                 with tc.no_grad():
-                    action = agent.act(state)
+                    action = agent.act(state).cpu().numpy()
 
             # perform action
             observation, _reward, _terminated, _truncated, *_ = env.step(action)
@@ -206,42 +211,43 @@ def train_agent(
                 _terminated = _terminated | _truncated
 
             # convert values to tensors
-            action = actions_onehot[tc.from_numpy(action)]
+            action_tc = f_action(action)
             next_state = obs_to_state(observation, agent.device)
             terminated = tc.tensor(_terminated, dtype=tc.bool, device=agent.device)
             truncated = tc.tensor(_truncated, dtype=tc.bool, device=agent.device)
             _reward_tc = tc.tensor(_reward, dtype=tc.float, device=agent.device)
 
             # compute reward
-            reward = reward_fn(state, action, _reward_tc, terminated)
+            reward = reward_fn(state, action_tc, _reward_tc, terminated)
 
             # accumulate total reward
             reward_until_reset += reward
 
             # save to buffer
             with tc.no_grad():
-                replay_buffer.add_iter(state, action, reward, next_state, terminated, truncated)
+                replay_buffer.add_iter(state, action_tc, reward, next_state, terminated, truncated)
 
             # handle individual environment resets
             for k, (e, done) in enumerate(zip(env.envs, terminated | truncated)):
-                if done:
-                    # reset environment
-                    e.reset()
+                if not done: continue
 
-                    # determine intermediate values
-                    new_reward = float(reward_until_reset[k])
-                    steps = int(t - t_last_reset[k])
+                # reset environment
+                e.reset()
 
-                    # update main metrics
-                    total_reward += new_reward
-                    mean_reward += new_reward / steps
-                    mean_steps += steps
+                # determine intermediate values
+                new_reward = float(reward_until_reset[k])
+                steps = int(t - t_last_reset[k])
+
+                # update main metrics
+                total_reward += new_reward
+                mean_reward += new_reward / steps
+                mean_steps += steps
 
 
-                    # update auxiliary metrics
-                    reward_until_reset[k] = 0
-                    reset_count += 1
-                    t_last_reset[k] = t
+                # update auxiliary metrics
+                reward_until_reset[k] = 0
+                reset_count += 1
+                t_last_reset[k] = t
 
             # update state
             state = next_state
@@ -300,6 +306,21 @@ def train_agent(
 
 
 def start_training(settings: dict[str, Any], use_prints: bool = False):
+    # handle external code
+    if 'external' in settings:
+        if use_prints: print("Handling external code...", end="")
+
+        external: dict[str, Any] = settings['external']
+        alter_settings: list[str] = external.get('alter_settings', [])
+
+        for s in alter_settings:
+            code = Path(s).read_text()
+            _locals: dict[str, Any] = {}
+            exec(code, globals(), _locals)
+            settings = _locals['alter_settings'](settings)
+
+        if use_prints: print(" Done!")
+
     # load settings
     if use_prints: print("Loading settings...", end="")
 
@@ -375,32 +396,50 @@ def start_training(settings: dict[str, Any], use_prints: bool = False):
     discretise: int = params.get('discretise', 0)
     env_generator = (
             (lambda: DiscretiseAction(gym.make(**params['env']), n_actions=discretise))
-        if discretise else
+        if discretise > 0 else
             (lambda: gym.make(**params['env']))
     )
 
     env = gym.vector.SyncVectorEnv([env_generator] * params['num_envs']) # TODO change to gym.vector.make (and probably asynchronous)
-    state_size = env.observation_space.shape[-1] # type: ignore
-    n_actions = int(env.action_space.nvec[0]) # type: ignore
+    state_size = env.observation_space.shape[1] # type: ignore
 
     # initialize agent
     ModelClass: type[Learner] = eval(params['model_class'])
 
     start_episode = params.get('start_episode', None)
     if start_episode is not None:
+        # -- load agent from checkpoint
+
         # torch.load doesn't know that BatchNorm is safe and raises an error by default (to prevent arbitrary code execution)
         with tc.serialization.safe_globals([nn.BatchNorm1d]):
             agent = ModelClass.load(params['save_path'], start_episode, DEVICE)
     else:
-        seed = params.get('seed', None)
-        agent = ModelClass(
-            architecture = [state_size + n_actions] + architecture_hidden + [1],
-            n_actions = n_actions,
-            use_reward_scaling=params['use_reward_scaling'],
-            device = DEVICE,
-            seed = seed,
-        )
+        # -- create new agent
 
+        # load model parameters
+        model_params = {
+            'seed': params.get('seed', None),
+            'device': DEVICE,
+        }
+        model_params.update(params['model_parameters'])
+
+        action_space = env.action_space
+        if isinstance(action_space, gym.spaces.MultiDiscrete):
+            n_actions = int(action_space.nvec[0])
+
+            # if action space is discrete, pass number of actions to model
+            model_params['n_actions'] = n_actions
+        elif isinstance(action_space, gym.spaces.Box):
+            n_actions = action_space.shape[1]
+        else:
+            raise ValueError("Environment has invalid action space type.")
+
+        model_params['architecture'] = [state_size + n_actions] + architecture_hidden + [1]
+
+        # create agent
+        agent = ModelClass(**model_params)
+
+    # initialise replay buffer
     replay_buffer = ReplayBuffer(params['replay_buffer_size'], DEVICE)
 
     if use_prints: print(" Done!\nTraining...")

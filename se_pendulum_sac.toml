@@ -1,0 +1,57 @@
+[setup]
+
+device = "cuda:0"
+use_mlflow = true
+mlflow_run_name = "Full-Scaled-New framework"
+
+mlflow_uri = "http://10.30.20.11:5000"
+mlflow_experiment = "jheis_SAC_Pendulum"
+
+
+[external] # for executing code specific to one use-case where it doesn't make sense to include it in the general framework
+
+alter_settings = ["snippets/init_gaussian_policy.py"]
+
+
+[parameters] # these are logged in mlflow
+
+# environment
+env = {id = "Pendulum-v1", max_episode_steps = 500}
+num_envs = 11
+
+# model architecture (excluding input & output size since these are determined by the environment)
+# because TOML doesn't support heterogeneous arrays, all entries must be strings, which are passed through eval()
+architecture_hidden = ["100", "100"]
+
+# training lengths
+n_episodes = 400
+n_steps_per_episode = 499
+n_train_epochs = 32 # training cycles per epoch
+batch_size = 128
+
+# model parameters
+model_class = "SAC"
+target_update = 0.85
+model_parameters = {temperature = 0.01}
+
+# variable parameters
+gamma = {fn_type = "constant", c = 0.99}            # discount factor
+epsilon = {fn_type = "constant", c = 0}             # chance for random action
+learning_rate = {fn_type = "constant", c = 3e-4}    # learning rate
+
+# replay buffer
+replay_buffer_size = 100_000
+
+# save parameters
+save_interval = 10
+save_path = "weights/pendulum/sac"
+
+
+[policy] # handled by the code snippet in "alter_settings"
+
+policy_class = "GaussianPolicy"
+architecture = ["3", "256", "256"]
+out_size = 1
+lower_bounds = [-2]
+upper_bounds = [2]
+
